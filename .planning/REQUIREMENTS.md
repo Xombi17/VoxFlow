@@ -10,12 +10,12 @@ Requirements for the first Ubuntu GNOME Wayland release. Each requirement maps t
 ### Platform and Session
 
 - [x] **PLAT-01**: The application reports whether it is running on Wayland, X11, or an unsupported session and lists the available shortcut, clipboard, paste, and audio capabilities.
-- [ ] **PLAT-02**: The user can configure and bind a dictation shortcut through a supported Ubuntu GNOME integration without the application requiring an account or paid service.
+- [x] **PLAT-02**: The user can configure and bind a dictation shortcut through a supported Ubuntu GNOME integration without the application requiring an account or paid service.
 - [x] **PLAT-03**: The user sees a clear idle, listening, processing, success, cancelled, or failed status while a dictation job is active.
 
 ### Audio and Transcription
 
-- [ ] **AUDIO-01**: The user can select a microphone, grant/deny permission, and receive actionable feedback when the device is missing, disconnected, muted, or unavailable.
+- [x] **AUDIO-01**: The user can select a microphone, grant/deny permission, and receive actionable feedback when the device is missing, disconnected, muted, or unavailable.
 - [ ] **AUDIO-02**: The user can dictate without network access using an installed local speech-to-text model.
 - [ ] **AUDIO-03**: The user can configure an optional LAN or cloud speech provider without changing the core dictation workflow.
 - [ ] **AUDIO-04**: The application records measured cold-start, warm-start, and end-to-end transcription latency for local provider profiles without sending telemetry.
