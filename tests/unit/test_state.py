@@ -53,3 +53,14 @@ def test_failed_transition_preserves_user_facing_reason() -> None:
         "state": "failed",
         "failure_reason": "Microphone disconnected",
     }
+
+
+def test_all_six_states_have_stable_serialized_names() -> None:
+    assert [state.value for state in SessionState] == [
+        "idle",
+        "listening",
+        "processing",
+        "success",
+        "cancelled",
+        "failed",
+    ]

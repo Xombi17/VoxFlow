@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Iterable
 from typing import Sequence
 
 from . import APP_NAME, __version__
+from .core.capabilities import CapabilityRecord
+from .core.state import SessionStateMachine
 
 
-def diagnostic() -> dict[str, object]:
-    """Return the bootstrap diagnostic without touching desktop resources."""
+def diagnostic(
+    capabilities: Iterable[CapabilityRecord] = (),
+    session: SessionStateMachine | None = None,
+) -> dict[str, object]:
+    """Return the core diagnostic without touching desktop resources."""
 
+    current_session = session or SessionStateMachine()
     return {
         "app": APP_NAME,
         "version": __version__,
-        "capabilities": [],
+        "capabilities": [capability.to_dict() for capability in capabilities],
+        "state": current_session.to_dict(),
     }
 
 
