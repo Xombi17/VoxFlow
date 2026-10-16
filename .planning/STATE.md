@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-10-16T18:30:00.000Z"
-last_activity: 2026-10-16
+last_updated: "2026-10-16T18:18:12.000Z"
+last_activity: 2026-10-16 - Completed Phase 1 code-review fixes
 progress:
   total_phases: 5
   completed_phases: 0
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-10-16)
 Phase: 01 (wayland-foundation) — EXECUTING
 Plan: 3 of 3
 Status: Complete; live host acceptance remains pending
-Last activity: 2026-10-16
+Last activity: 2026-10-16 - Completed Phase 1 code-review fixes
 
 Progress: [██████████] 100%
 
@@ -79,6 +79,12 @@ None yet.
 - Phase 1 must validate microphone permission, mute, disconnect, recovery, and negotiated format on Ubuntu GNOME. Plan 01-03 provides the adapter/checklist and records this host's missing `sounddevice` limitation.
 - Phase 1 must validate a safe, usable Wayland insertion path for the user's target applications.
 - Target hardware details are still needed before choosing a default local ASR model size.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 261016-wlc | Phase 1 session, portal, shortcut, audio, and offline review fixes | 2026-10-16 | bdc9253, e229d48, af6e448, 450e2e9, b0a602e | Verified | [quick task](./quick/261016-wlc-apply-focused-phase-1-code-review-fixes-/) |
 
 ## Deferred Items
 
