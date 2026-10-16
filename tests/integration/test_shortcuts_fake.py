@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from voxflow.core.capabilities import CapabilityStatus
 from voxflow.core.state import SessionState
 from voxflow.platform.portals import (
@@ -15,12 +17,22 @@ from voxflow.platform.shortcuts import (
 
 
 class FakePortalConnection:
-    def __init__(self, *, bindings=None, bind_error=None, include_deactivated=True):
+    def __init__(
+        self,
+        *,
+        bindings=None,
+        bind_error=None,
+        include_deactivated=True,
+        subscribe_errors=None,
+    ):
         self.bindings = bindings
         self.bind_error = bind_error
         self.include_deactivated = include_deactivated
+        self.subscribe_errors = subscribe_errors or {}
         self.callbacks = {}
         self.calls = []
+        self.closed_sessions = []
+        self.closed = False
 
     async def introspect(self, bus_name, object_path, interface):
         signals = {"Activated"}
@@ -55,12 +67,20 @@ class FakePortalConnection:
         raise AssertionError(method)
 
     async def subscribe(self, signal, callback):
+        if signal in self.subscribe_errors:
+            raise self.subscribe_errors[signal]
         self.callbacks[signal] = callback
 
         def unsubscribe():
             self.callbacks.pop(signal, None)
 
         return unsubscribe
+
+    async def close_session(self, session_handle):
+        self.closed_sessions.append(session_handle)
+
+    async def close(self):
+        self.closed = True
 
     def emit(self, signal, *arguments):
         return self.callbacks[signal](*arguments)
@@ -159,3 +179,66 @@ def test_empty_binding_is_a_typed_configuration_failure() -> None:
     assert setup.failure.code is PortalErrorCode.REQUEST_FAILED
     assert setup.capabilities[0].status is CapabilityStatus.NEEDS_USER_ACTION
     assert "no binding" in setup.capabilities[0].reason
+
+
+def test_deactivated_subscription_failure_cleans_up_activated_and_session() -> None:
+    async def scenario():
+        connection = FakePortalConnection(
+            subscribe_errors={
+                "Deactivated": PortalClientError(
+                    PortalErrorCode.REQUEST_FAILED,
+                    "backend leaked private detail",
+                )
+            }
+        )
+        adapter = GlobalShortcutsAdapter(GlobalShortcutsPortal(connection))
+        setup = await adapter.configure()
+        return connection, adapter, setup
+
+    connection, adapter, setup = asyncio.run(scenario())
+
+    assert not setup.configured
+    assert setup.session_handle is None
+    assert setup.binding is None
+    assert setup.failure is not None
+    assert setup.failure.code is PortalErrorCode.REQUEST_FAILED
+    assert "backend leaked private detail" not in setup.failure.reason
+    assert connection.callbacks == {}
+    assert connection.closed_sessions == ["/org/freedesktop/portal/session/1"]
+    assert not adapter.hold_supported
+
+
+def test_configuration_cancellation_propagates_and_cleans_partial_setup() -> None:
+    async def scenario():
+        connection = FakePortalConnection(
+            subscribe_errors={"Deactivated": asyncio.CancelledError()}
+        )
+        adapter = GlobalShortcutsAdapter(GlobalShortcutsPortal(connection))
+        with pytest.raises(asyncio.CancelledError):
+            await adapter.configure()
+        return connection, adapter
+
+    connection, adapter = asyncio.run(scenario())
+
+    assert connection.callbacks == {}
+    assert connection.closed_sessions == ["/org/freedesktop/portal/session/1"]
+    assert not adapter.hold_supported
+
+
+def test_close_unsubscribes_releases_session_and_closes_transport() -> None:
+    async def scenario():
+        connection = FakePortalConnection()
+        adapter = GlobalShortcutsAdapter(GlobalShortcutsPortal(connection))
+        setup = await adapter.configure()
+        failure = await adapter.close()
+        return connection, adapter, setup, failure
+
+    connection, adapter, setup, failure = asyncio.run(scenario())
+
+    assert setup.configured
+    assert failure is None
+    assert connection.callbacks == {}
+    assert connection.closed_sessions == ["/org/freedesktop/portal/session/1"]
+    assert connection.closed
+    assert not adapter.capabilities
+    assert not adapter.hold_supported

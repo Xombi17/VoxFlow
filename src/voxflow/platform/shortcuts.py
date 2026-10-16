@@ -211,6 +211,11 @@ class GlobalShortcutsAdapter:
             )
             return self._setup_result
 
+        session_handle: str | None = None
+        binding: BoundShortcut | None = None
+        pending_unsubscribers: list[Callable[[], object]] = []
+        committed = False
+        failure: PortalFailure | None = None
         try:
             session_handle = await self.portal.create_session()
             bindings = await self.portal.bind_shortcut(
@@ -232,76 +237,131 @@ class GlobalShortcutsAdapter:
                         "Choose a trigger in the portal dialog and try again."
                     ),
                 )
-                self._setup_result = ShortcutSetupResult(
-                    session_handle=session_handle,
-                    binding=None,
-                    capabilities=(capability_for_failure(failure),),
-                    failure=failure,
-                )
-                return self._setup_result
-
-            self._session_handle = session_handle
-            self._binding = binding
-            self._portal_signals = set(probe.signals)
-            if "Activated" not in self._portal_signals:
-                failure = PortalFailure(
-                    code=PortalErrorCode.MALFORMED_RESPONSE,
-                    status=CapabilityStatus.UNSUPPORTED,
-                    reason=(
-                        "The portal does not expose Activated; global shortcut "
-                        "activation cannot be mapped to dictation start."
-                    ),
-                )
-                self._setup_result = ShortcutSetupResult(
-                    session_handle=session_handle,
-                    binding=None,
-                    capabilities=(capability_for_failure(failure),),
-                    failure=failure,
-                )
-                self._binding = None
-                return self._setup_result
-            unsubscribe_activated = await self.portal.subscribe(
-                "Activated", self._on_activated
-            )
-            self._unsubscribers.append(unsubscribe_activated)
-            if "Deactivated" in self._portal_signals:
-                try:
-                    unsubscribe_deactivated = await self.portal.subscribe(
-                        "Deactivated", self._on_deactivated
+            else:
+                portal_signals = set(probe.signals)
+                if "Activated" not in portal_signals:
+                    failure = PortalFailure(
+                        code=PortalErrorCode.MALFORMED_RESPONSE,
+                        status=CapabilityStatus.UNSUPPORTED,
+                        reason=(
+                            "The portal does not expose Activated; global shortcut "
+                            "activation cannot be mapped to dictation start."
+                        ),
                     )
-                except (PortalClientError, ValueError):
-                    unsubscribe_deactivated = None
-                    self._portal_signals.discard("Deactivated")
-                if unsubscribe_deactivated is not None:
-                    self._unsubscribers.append(unsubscribe_deactivated)
+                else:
+                    unsubscribe_activated = await self.portal.subscribe(
+                        "Activated", self._on_activated
+                    )
+                    pending_unsubscribers.append(unsubscribe_activated)
+                    if "Deactivated" in portal_signals:
+                        unsubscribe_deactivated = await self.portal.subscribe(
+                            "Deactivated", self._on_deactivated
+                        )
+                        pending_unsubscribers.append(unsubscribe_deactivated)
 
+                    self._session_handle = session_handle
+                    self._binding = binding
+                    self._portal_signals = portal_signals
+                    self._unsubscribers.extend(pending_unsubscribers)
+                    pending_unsubscribers.clear()
+                    committed = True
+
+        except Exception as exc:
+            failure = map_portal_error(exc)
+        finally:
+            if not committed:
+                await self._cleanup_partial_setup(
+                    pending_unsubscribers,
+                    session_handle,
+                )
+
+        if not committed:
+            self._clear_local_state()
+            assert failure is not None
             self._setup_result = ShortcutSetupResult(
-                session_handle=session_handle,
-                binding=binding,
-                capabilities=self.capabilities,
+                session_handle=None,
+                binding=None,
+                capabilities=(capability_for_failure(failure),),
+                failure=failure,
             )
             return self._setup_result
-        except asyncio.CancelledError as exc:
-            failure = map_portal_error(exc)
-        except BaseException as exc:
-            failure = map_portal_error(exc)
 
+        assert session_handle is not None
+        assert binding is not None
         self._setup_result = ShortcutSetupResult(
-            session_handle=self._session_handle,
-            binding=self._binding,
-            capabilities=(capability_for_failure(failure),),
-            failure=failure,
+            session_handle=session_handle,
+            binding=binding,
+            capabilities=self.capabilities,
         )
         return self._setup_result
 
-    async def close(self) -> None:
-        """Remove signal subscriptions without touching global input directly."""
+    async def _cleanup_partial_setup(
+        self,
+        unsubscribers: list[Callable[[], object]],
+        session_handle: str | None,
+    ) -> None:
+        """Release resources acquired before setup committed.
 
-        for unsubscribe in reversed(self._unsubscribers):
-            result = unsubscribe()
-            if inspect.isawaitable(result):
-                await result
+        Cleanup handles ordinary teardown errors so the original typed setup
+        failure remains visible.  Cancellation is intentionally not caught.
+        """
+
+        for unsubscribe in reversed(unsubscribers):
+            try:
+                result = unsubscribe()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                continue
+        if session_handle is not None:
+            try:
+                await self.portal.close_session(session_handle)
+            except Exception:
+                pass
+
+    def _clear_local_state(self) -> None:
+        self._session_handle = None
+        self._binding = None
+        self._portal_signals.clear()
+        self._activated_seen = False
+        self._deactivated_seen = False
         self._unsubscribers.clear()
+
+    async def close(self) -> PortalFailure | None:
+        """Unsubscribe, release the portal session, and close its transport.
+
+        A transport without a session-release boundary may reclaim the desktop
+        session only when the client disappears from D-Bus.  Local state is
+        still cleared in all ordinary and cancellation paths.
+        """
+
+        failure: PortalFailure | None = None
+        try:
+            for unsubscribe in reversed(self._unsubscribers):
+                try:
+                    result = unsubscribe()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception as exc:
+                    if failure is None:
+                        failure = map_portal_error(exc)
+
+            if self._session_handle is not None:
+                try:
+                    await self.portal.close_session(self._session_handle)
+                except Exception as exc:
+                    if failure is None:
+                        failure = map_portal_error(exc)
+
+            try:
+                await self.portal.close()
+            except Exception as exc:
+                if failure is None:
+                    failure = map_portal_error(exc)
+        finally:
+            self._clear_local_state()
+            self._setup_result = None
+        return failure
 
     def _on_activated(self, *arguments: object) -> ShortcutEvent | None:
         return self._handle_signal(ShortcutEventType.LISTENING_STARTED, arguments)
