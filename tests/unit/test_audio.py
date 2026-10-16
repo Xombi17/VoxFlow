@@ -25,10 +25,18 @@ FORMAT = AudioFormat(sample_rate=48_000, channels=1)
 
 
 class FakeStream:
-    def __init__(self, *, start_error=None, stop_error=None, close_error=None):
+    def __init__(
+        self,
+        *,
+        start_error=None,
+        stop_error=None,
+        close_error=None,
+        close_errors=None,
+    ):
         self.start_error = start_error
         self.stop_error = stop_error
         self.close_error = close_error
+        self.close_errors = list(close_errors or ())
         self.calls = []
         self.active = False
         self.closed = False
@@ -47,6 +55,8 @@ class FakeStream:
 
     async def close(self):
         self.calls.append("close")
+        if self.close_errors:
+            raise self.close_errors.pop(0)
         if self.close_error:
             raise self.close_error
         self.active = False
@@ -270,6 +280,40 @@ def test_close_attempts_cleanup_after_disconnect_during_stop() -> None:
     assert events[-1].type is AudioEventType.CAPTURE_CLOSED
 
 
+def test_close_failure_retains_handle_until_a_retry_succeeds() -> None:
+    async def scenario():
+        backend = FakeAudioBackend()
+        backend.stream = FakeStream(
+            close_errors=[
+                AudioBackendError(
+                    AudioErrorCode.BACKEND_UNAVAILABLE,
+                    "fake close failure",
+                )
+            ]
+        )
+        events = []
+        capture = AudioCapture(backend, listener=events.append)
+        await capture.open()
+        first_failure = await capture.close()
+        second_failure = await capture.close()
+        return backend, capture, events, first_failure, second_failure
+
+    backend, capture, events, first_failure, second_failure = asyncio.run(scenario())
+
+    assert first_failure is not None
+    assert first_failure.code is AudioErrorCode.BACKEND_UNAVAILABLE
+    assert second_failure is None
+    assert backend.stream.calls == ["close", "close"]
+    assert backend.stream.closed
+    assert capture.state is AudioCaptureState.CLOSED
+    assert not capture.has_active_stream
+    assert [event.type for event in events] == [
+        AudioEventType.CAPTURE_OPENED,
+        AudioEventType.CAPTURE_FAILED,
+        AudioEventType.CAPTURE_CLOSED,
+    ]
+
+
 def test_open_validation_failure_closes_the_opened_stream() -> None:
     async def scenario():
         backend = FakeAudioBackend(opened_format=AudioFormat(16_000, 1))
@@ -284,6 +328,33 @@ def test_open_validation_failure_closes_the_opened_stream() -> None:
     assert backend.stream.closed
     assert not capture.has_active_stream
     assert capture.state is AudioCaptureState.FAILED
+
+
+def test_open_cleanup_failure_retains_handle_for_retry() -> None:
+    async def scenario():
+        backend = FakeAudioBackend(opened_format=AudioFormat(16_000, 1))
+        backend.stream = FakeStream(
+            close_errors=[
+                AudioBackendError(
+                    AudioErrorCode.BACKEND_UNAVAILABLE,
+                    "validation cleanup failed",
+                )
+            ]
+        )
+        capture = AudioCapture(backend, requested_format=FORMAT)
+        with pytest.raises(AudioCaptureError) as raised:
+            await capture.open()
+        retry_failure = await capture.close()
+        return capture, backend.stream, raised.value, retry_failure
+
+    capture, stream, error, retry_failure = asyncio.run(scenario())
+
+    assert error.failure.code is AudioErrorCode.BACKEND_UNAVAILABLE
+    assert retry_failure is None
+    assert stream.calls == ["close", "close"]
+    assert stream.closed
+    assert capture.state is AudioCaptureState.CLOSED
+    assert not capture.has_active_stream
 
 
 def test_start_failure_closes_handle_and_reopen_does_not_retain_it() -> None:
@@ -311,6 +382,39 @@ def test_start_failure_closes_handle_and_reopen_does_not_retain_it() -> None:
     assert capture.has_active_stream
     assert capture.state is AudioCaptureState.OPEN
     assert capture._stream is replacement_stream
+
+
+def test_start_cleanup_failure_retains_handle_for_retry() -> None:
+    async def scenario():
+        backend = FakeAudioBackend()
+        failed_stream = FakeStream(
+            start_error=AudioBackendError(
+                AudioErrorCode.BACKEND_UNAVAILABLE,
+                "start failed",
+            ),
+            close_errors=[
+                AudioBackendError(
+                    AudioErrorCode.BACKEND_UNAVAILABLE,
+                    "start cleanup failed",
+                )
+            ],
+        )
+        backend.stream = failed_stream
+        capture = AudioCapture(backend)
+        await capture.open()
+        with pytest.raises(AudioCaptureError) as raised:
+            await capture.start()
+        retry_failure = await capture.close()
+        return capture, failed_stream, raised.value, retry_failure
+
+    capture, stream, error, retry_failure = asyncio.run(scenario())
+
+    assert error.failure.code is AudioErrorCode.BACKEND_UNAVAILABLE
+    assert retry_failure is None
+    assert stream.calls == ["start", "close", "close"]
+    assert stream.closed
+    assert capture.state is AudioCaptureState.CLOSED
+    assert not capture.has_active_stream
 
 
 class FakeSoundDeviceStream:

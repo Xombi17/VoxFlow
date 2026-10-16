@@ -10,9 +10,10 @@ FORMAT = AudioFormat(sample_rate=48_000, channels=1)
 
 
 class FakeProbeStream:
-    def __init__(self):
+    def __init__(self, *, close_error=None):
         self.closed = False
         self.started = False
+        self.close_error = close_error
 
     async def start(self):
         self.started = True
@@ -21,18 +22,20 @@ class FakeProbeStream:
         self.started = False
 
     async def close(self):
+        if self.close_error:
+            raise self.close_error
         self.closed = True
 
 
 class FakeProbeBackend:
-    def __init__(self, *, unavailable=False):
+    def __init__(self, *, unavailable=False, close_error=None):
         self.device = AudioDevice(
             id="fake-mic",
             name="Fake microphone",
             is_default=True,
             supported_formats=(FORMAT,),
         )
-        self.stream = FakeProbeStream()
+        self.stream = FakeProbeStream(close_error=close_error)
         self.unavailable = unavailable
 
     async def enumerate_devices(self):
@@ -78,6 +81,22 @@ def test_probe_reports_unavailable_backend_as_safe_json() -> None:
     assert report["capability"]["status"] == "unsupported"
     assert report["failure"]["code"] == "backend_unavailable"
     assert report["capture"]["closed"] is True
+
+
+def test_probe_reports_failed_cleanup_as_unavailable_and_active() -> None:
+    backend = FakeProbeBackend(
+        close_error=AudioBackendError(
+            AudioErrorCode.BACKEND_UNAVAILABLE,
+            "fake stream close failed",
+        )
+    )
+
+    report = asyncio.run(probe_audio(backend))
+
+    assert report["capability"]["status"] == "unsupported"
+    assert report["failure"]["code"] == "backend_unavailable"
+    assert report["capture"] == {"active": True, "closed": False, "started": False}
+    assert not backend.stream.closed
 
 
 def test_main_includes_audio_only_when_explicitly_requested(capsys, monkeypatch) -> None:

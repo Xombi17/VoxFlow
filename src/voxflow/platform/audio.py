@@ -391,14 +391,29 @@ class AudioCapture:
                 discovery.selected_device_id,
                 self.config.requested_format,
             )
+            if isinstance(opened, OpenedAudioStream):
+                self._stream = opened.stream
+                self._device = opened.device
+                self._format = opened.format
+                self._state = AudioCaptureState.OPEN
             self._validate_opened_stream(opened, discovery.selected_device_id)
         except asyncio.CancelledError:
             if isinstance(opened, OpenedAudioStream):
-                await self._close_failed_stream(opened.stream)
+                cleanup_failure = await self._close_failed_stream(opened.stream)
+                if cleanup_failure is None:
+                    self._stream = None
+                    self._state = AudioCaptureState.CLOSED
+                else:
+                    self._record_failure(cleanup_failure)
             raise
         except Exception as exc:
             if isinstance(opened, OpenedAudioStream):
-                await self._close_failed_stream(opened.stream)
+                cleanup_failure = await self._close_failed_stream(opened.stream)
+                if cleanup_failure is None:
+                    self._stream = None
+                else:
+                    self._record_failure(cleanup_failure)
+                    raise AudioCaptureError(cleanup_failure) from exc
             failure = map_audio_error(exc)
             self._record_failure(failure)
             raise AudioCaptureError(failure) from exc
@@ -427,14 +442,12 @@ class AudioCapture:
             raise
         except Exception as exc:
             failure = map_audio_error(exc)
-            try:
-                await stream.close()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                pass
-            finally:
+            cleanup_failure = await self._close_failed_stream(stream)
+            if cleanup_failure is None:
                 self._stream = None
+            else:
+                self._record_failure(cleanup_failure)
+                raise AudioCaptureError(cleanup_failure) from exc
             self._record_failure(failure)
             raise AudioCaptureError(failure) from exc
         self._state = AudioCaptureState.RUNNING
@@ -472,35 +485,36 @@ class AudioCapture:
         stream = self._stream
         if stream is None:
             self._state = AudioCaptureState.CLOSED
-            return self._last_failure
+            return None
 
-        try:
-            if self._state is AudioCaptureState.RUNNING:
-                try:
-                    await stream.stop()
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    failure = map_audio_error(exc)
-                    self._record_failure(failure)
-        finally:
+        if self._state is AudioCaptureState.RUNNING:
             try:
-                await stream.close()
+                await stream.stop()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                close_failure = map_audio_error(exc)
-                if failure is None:
-                    failure = close_failure
-                self._record_failure(close_failure)
-            self._stream = None
-            self._state = AudioCaptureState.CLOSED
-            self._emit(
-                AudioEventType.CAPTURE_CLOSED,
-                device_id=self._device.id if self._device else None,
-                sample_rate=self._format.sample_rate if self._format else None,
-                channels=self._format.channels if self._format else None,
-            )
+                failure = map_audio_error(exc)
+                self._record_failure(failure)
+
+        try:
+            await stream.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Keep the backend handle for a retry. Reporting it as closed here
+            # would make the probe and the next lifecycle operation lie.
+            close_failure = map_audio_error(exc)
+            self._record_failure(close_failure)
+            return close_failure
+
+        self._stream = None
+        self._state = AudioCaptureState.CLOSED
+        self._emit(
+            AudioEventType.CAPTURE_CLOSED,
+            device_id=self._device.id if self._device else None,
+            sample_rate=self._format.sample_rate if self._format else None,
+            channels=self._format.channels if self._format else None,
+        )
         return failure
 
     async def __aenter__(self) -> AudioCapture:
@@ -522,15 +536,16 @@ class AudioCapture:
             error_reason=failure.reason,
         )
 
-    async def _close_failed_stream(self, stream: AudioStream) -> None:
+    async def _close_failed_stream(self, stream: AudioStream) -> AudioFailure | None:
         """Close a backend handle that failed before capture became open."""
 
         try:
             await stream.close()
         except asyncio.CancelledError:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            return map_audio_error(exc)
+        return None
 
     def _emit(
         self,
@@ -775,6 +790,8 @@ async def probe_audio(
         }
         if close_failure is not None and report["failure"] is None:
             report["failure"] = close_failure.to_dict()
+        if close_failure is not None:
+            report["capability"] = capability_for_audio_failure(close_failure).to_dict()
     return report
 
 
