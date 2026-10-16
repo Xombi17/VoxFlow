@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-10-16T18:18:12.000Z"
-last_activity: 2026-10-16 - Completed Phase 1 code-review fixes
+last_updated: "2026-10-16T18:42:00.000Z"
+last_activity: 2026-10-17 - Completed remaining Phase 1 review fixes
 progress:
   total_phases: 5
   completed_phases: 0
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-10-16)
 Phase: 01 (wayland-foundation) — EXECUTING
 Plan: 3 of 3
 Status: Complete; live host acceptance remains pending
-Last activity: 2026-10-16 - Completed Phase 1 code-review fixes
+Last activity: 2026-10-17 - Completed remaining Phase 1 review fixes
 
 Progress: [██████████] 100%
 
@@ -85,6 +85,7 @@ None yet.
 | # | Description | Date | Commit | Status | Directory |
 |---|-------------|------|--------|--------|-----------|
 | 261016-wlc | Phase 1 session, portal, shortcut, audio, and offline review fixes | 2026-10-16 | bdc9253, e229d48, af6e448, 450e2e9, b0a602e | Verified | [quick task](./quick/261016-wlc-apply-focused-phase-1-code-review-fixes-/) |
+| 261017-034 | Remaining Phase 1 audio teardown and reproducible test-command fixes | 2026-10-17 | bd4f391, 8ec439c, e256a64 | Verified | [quick task](./quick/261017-034-fix-remaining-phase-1-findings/) |
 
 ## Deferred Items
 
