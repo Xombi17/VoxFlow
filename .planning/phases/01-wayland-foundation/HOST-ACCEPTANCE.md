@@ -175,6 +175,9 @@ Current repository-host observations (2026-10-16):
 - The audio probe returned `backend_unavailable` because `sounddevice` was not
   installed. No device, negotiated format, permission dialog, or disconnect
   recovery was claimed from that run.
+- The optional `sounddevice` adapter does not currently expose system mute
+  metadata; a muted-source result therefore needs the host audio settings
+  check or a future PipeWire-native mute adapter.
 - The offline suite uses fakes only and does not validate PipeWire, a real
   microphone, or an ASR/model provider.
 

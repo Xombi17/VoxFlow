@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-10-16T17:45:00.000Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-10-16T18:30:00.000Z"
 last_activity: 2026-10-16
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 3
-  completed_plans: 2
-  percent: 67
+  completed_plans: 3
+  percent: 100
 ---
 
 # Project State
@@ -27,24 +27,24 @@ See: `.planning/PROJECT.md` (updated 2026-10-16)
 
 Phase: 01 (wayland-foundation) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Complete; live host acceptance remains pending
 Last activity: 2026-10-16
 
-Progress: [██████░░░░] 67%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 2
-- Average duration: 18.5 min
-- Total execution time: 0.6 hours
+- Total plans completed: 3
+- Average duration: not measured for this execution
+- Total execution time: not measured for this execution
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Wayland Foundation | 2 | 3 | 18.5 min |
+| 1. Wayland Foundation | 3 | 3 | — |
 | 2. Local Dictation Engine | 0 | 3 | — |
 | 3. Writing Pipeline | 0 | 3 | — |
 | 4. Insert and Recover | 0 | 3 | — |
@@ -52,7 +52,7 @@ Progress: [██████░░░░] 67%
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01, 01-02
+- Last 5 plans: 01-01, 01-02, 01-03
 - Trend: steady
 
 | Phase 01 P01 | 12 min | 3 tasks | 10 files |
@@ -76,6 +76,7 @@ None yet.
 ### Blockers/Concerns
 
 - Phase 1 must validate whether the installed portal backend supports reliable hold/release semantics for push-to-talk. Plan 01-02 provides the adapter and records this host's missing `dbus-next` limitation.
+- Phase 1 must validate microphone permission, mute, disconnect, recovery, and negotiated format on Ubuntu GNOME. Plan 01-03 provides the adapter/checklist and records this host's missing `sounddevice` limitation.
 - Phase 1 must validate a safe, usable Wayland insertion path for the user's target applications.
 - Target hardware details are still needed before choosing a default local ASR model size.
 
