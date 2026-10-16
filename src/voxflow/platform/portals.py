@@ -159,6 +159,7 @@ def map_portal_error(error: BaseException, *, interface: str = GLOBAL_SHORTCUTS_
             marker in text
             for marker in (
                 "accessdenied",
+                "notallowed",
                 "permission",
                 "not allowed",
                 "denied",
@@ -252,10 +253,11 @@ def _description_from_mapping(
 
 
 def _extract_string(value: object, *, field: str) -> str:
+    value = _unwrap_dbus_value(value)
     if isinstance(value, str) and value.strip():
         return value
     if isinstance(value, Mapping):
-        candidate = value.get(field)
+        candidate = _unwrap_dbus_value(value.get(field))
         if isinstance(candidate, str) and candidate.strip():
             return candidate
     raise PortalClientError(
@@ -265,8 +267,9 @@ def _extract_string(value: object, *, field: str) -> str:
 
 
 def _extract_shortcuts(value: object) -> tuple[BoundShortcut, ...]:
+    value = _unwrap_dbus_value(value)
     if isinstance(value, Mapping):
-        value = value.get("shortcuts")
+        value = _unwrap_dbus_value(value.get("shortcuts"))
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise PortalClientError(
             PortalErrorCode.MALFORMED_RESPONSE,
@@ -286,8 +289,8 @@ def _extract_shortcuts(value: object) -> tuple[BoundShortcut, ...]:
                 PortalErrorCode.MALFORMED_RESPONSE,
                 "portal shortcut entry has invalid ID or properties",
             )
-        description = properties.get("description", "")
-        trigger = properties.get("trigger_description", "")
+        description = _unwrap_dbus_value(properties.get("description", ""))
+        trigger = _unwrap_dbus_value(properties.get("trigger_description", ""))
         if not isinstance(description, str) or not isinstance(trigger, str):
             raise PortalClientError(
                 PortalErrorCode.MALFORMED_RESPONSE,
@@ -301,6 +304,14 @@ def _extract_shortcuts(value: object) -> tuple[BoundShortcut, ...]:
             )
         )
     return tuple(bound)
+
+
+def _unwrap_dbus_value(value: object) -> object:
+    """Read a dbus-next Variant without requiring dbus-next in core tests."""
+
+    if value.__class__.__name__ == "Variant" and hasattr(value, "value"):
+        return _unwrap_dbus_value(value.value)
+    return value
 
 
 class GlobalShortcutsPortal:
