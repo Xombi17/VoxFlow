@@ -146,6 +146,29 @@ def test_permission_denial_is_actionable_and_typed() -> None:
     assert "allow" in result.failure.reason.lower()
 
 
+def test_muted_device_is_needs_user_action_before_open() -> None:
+    async def scenario():
+        backend = FakeAudioBackend(
+            devices=(
+                AudioDevice(
+                    id="muted-mic",
+                    name="Muted microphone",
+                    is_default=True,
+                    is_muted=True,
+                    supported_formats=(FORMAT,),
+                ),
+            )
+        )
+        return await AudioDeviceDiscovery(backend).discover()
+
+    result = asyncio.run(scenario())
+
+    assert result.failure is not None
+    assert result.failure.code is AudioErrorCode.MUTED
+    assert result.capability.status is CapabilityStatus.NEEDS_USER_ACTION
+    assert "unmute" in result.failure.reason.lower()
+
+
 @pytest.mark.parametrize(
     ("code", "expected_status"),
     [
