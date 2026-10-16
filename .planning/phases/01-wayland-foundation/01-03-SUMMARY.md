@@ -105,6 +105,7 @@ Each implementation task was committed atomically:
 2. **Task 2: Add safe host audio probe and diagnostic integration** - `f816896` (`feat`)
 3. **Task 3: Record Phase 1 host acceptance and format findings** - `0739e69` (`docs`)
 4. **Supplemental audio backend error normalization** - `0a39ee2` (`fix`)
+5. **Supplemental muted-input fake coverage** - `a31594e` (`test`)
 
 **Plan metadata:** recorded in a separate metadata commit after verification.
 
@@ -122,9 +123,9 @@ Each implementation task was committed atomically:
 ## Verification Evidence
 
 - `PATH="/home/varad/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu/bin:$PATH" PYTHONPATH="src:/usr/lib/python3/dist-packages" NETWORK_DISABLED=1 python3.12 -m pytest -q tests/unit/test_audio.py tests/integration/test_audio_probe.py tests/unit/test_capabilities.py`
-  - `15 passed in 0.02s`
+  - `16 passed`.
 - `PATH="/home/varad/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu/bin:$PATH" PYTHONPATH="src:/usr/lib/python3/dist-packages" NETWORK_DISABLED=1 make PYTHONPATH="src:/usr/lib/python3/dist-packages" test`
-  - `31 passed in 0.03s`
+  - `32 passed`.
 - `PATH="/home/varad/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu/bin:$PATH" PYTHONPATH="src:/usr/lib/python3/dist-packages" python3.12 -m compileall -q src tests tools`
   - Passed.
 - `PATH="/home/varad/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu/bin:$PATH" PYTHONPATH=src python3.12 tools/audio_probe.py --json`
