@@ -32,7 +32,7 @@ VoxFlow will be built as a Linux-first vertical slice. The roadmap starts by pro
 Plans:
 **Wave 1**
 
-- [ ] 01-01: Bootstrap pinned Python/GTK project structure, core state contracts, and offline test harness.
+- [x] 01-01: Bootstrap pinned Python/GTK project structure, core state contracts, and offline test harness.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -131,7 +131,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Wayland Foundation | 0/3 | Not started | - |
+| 1. Wayland Foundation | 1/3 | In Progress|  |
 | 2. Local Dictation Engine | 0/3 | Not started | - |
 | 3. Writing Pipeline | 0/3 | Not started | - |
 | 4. Insert and Recover | 0/3 | Not started | - |

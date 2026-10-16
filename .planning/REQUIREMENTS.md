@@ -9,9 +9,9 @@ Requirements for the first Ubuntu GNOME Wayland release. Each requirement maps t
 
 ### Platform and Session
 
-- [ ] **PLAT-01**: The application reports whether it is running on Wayland, X11, or an unsupported session and lists the available shortcut, clipboard, paste, and audio capabilities.
+- [x] **PLAT-01**: The application reports whether it is running on Wayland, X11, or an unsupported session and lists the available shortcut, clipboard, paste, and audio capabilities.
 - [ ] **PLAT-02**: The user can configure and bind a dictation shortcut through a supported Ubuntu GNOME integration without the application requiring an account or paid service.
-- [ ] **PLAT-03**: The user sees a clear idle, listening, processing, success, cancelled, or failed status while a dictation job is active.
+- [x] **PLAT-03**: The user sees a clear idle, listening, processing, success, cancelled, or failed status while a dictation job is active.
 
 ### Audio and Transcription
 
@@ -89,9 +89,9 @@ Deferred until the v1 dictation loop is reliable.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PLAT-01 | Phase 1 | Pending |
+| PLAT-01 | Phase 1 | Complete |
 | PLAT-02 | Phase 1 | Pending |
-| PLAT-03 | Phase 1 | Pending |
+| PLAT-03 | Phase 1 | Complete |
 | AUDIO-01 | Phase 1 | Pending |
 | AUDIO-02 | Phase 2 | Pending |
 | AUDIO-03 | Phase 2 | Pending |
