@@ -62,6 +62,10 @@ def test_probe_opens_and_closes_without_starting_or_emitting_samples() -> None:
     assert report["capture"] == {"active": False, "closed": True, "started": False}
     assert not backend.stream.started
     assert backend.stream.closed
+    assert "Fake microphone" not in json.dumps(report)
+    assert "fake-mic" not in json.dumps(report)
+    assert report["devices"][0]["id"] == "<device-0>"
+    assert report["devices"][0]["name"] == "<redacted-device-name>"
     assert "samples" not in json.dumps(report)
 
 

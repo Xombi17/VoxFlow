@@ -55,13 +55,12 @@ class AudioDevice:
             ],
         }
 
-    def to_safe_dict(self) -> dict[str, object]:
-        """Return probe-safe metadata without emitting absolute device paths."""
+    def to_safe_dict(self, *, label: str | None = None) -> dict[str, object]:
+        """Return probe-safe metadata without emitting device identifiers."""
 
-        safe_id = "<redacted-path>" if self.id.startswith("/") else self.id
         return {
-            "id": safe_id,
-            "name": self.name,
+            "id": label or "<redacted-device-id>",
+            "name": "<redacted-device-name>",
             "is_default": self.is_default,
             "is_muted": self.is_muted,
             "supported_formats": [

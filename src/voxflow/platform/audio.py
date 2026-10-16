@@ -369,6 +369,10 @@ class AudioCapture:
     async def open(self) -> OpenedAudioStream:
         if self._state not in {AudioCaptureState.CLOSED, AudioCaptureState.FAILED}:
             raise RuntimeError(f"cannot open capture while state is {self._state.value}")
+        if self._state is AudioCaptureState.FAILED and self._stream is not None:
+            close_failure = await self.close()
+            if close_failure is not None:
+                raise AudioCaptureError(close_failure)
 
         discovery = await AudioDeviceDiscovery(self.backend).discover(
             self.selected_device_id
@@ -381,6 +385,7 @@ class AudioCapture:
             self._record_failure(failure)
             raise AudioCaptureError(failure)
 
+        opened: OpenedAudioStream | None = None
         try:
             opened = await self.backend.open(
                 discovery.selected_device_id,
@@ -388,8 +393,12 @@ class AudioCapture:
             )
             self._validate_opened_stream(opened, discovery.selected_device_id)
         except asyncio.CancelledError:
+            if isinstance(opened, OpenedAudioStream):
+                await self._close_failed_stream(opened.stream)
             raise
         except Exception as exc:
+            if isinstance(opened, OpenedAudioStream):
+                await self._close_failed_stream(opened.stream)
             failure = map_audio_error(exc)
             self._record_failure(failure)
             raise AudioCaptureError(failure) from exc
@@ -411,12 +420,21 @@ class AudioCapture:
         if self._state not in {AudioCaptureState.OPEN, AudioCaptureState.STOPPED}:
             raise RuntimeError(f"cannot start capture while state is {self._state.value}")
         assert self._stream is not None
+        stream = self._stream
         try:
-            await self._stream.start()
+            await stream.start()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             failure = map_audio_error(exc)
+            try:
+                await stream.close()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            finally:
+                self._stream = None
             self._record_failure(failure)
             raise AudioCaptureError(failure) from exc
         self._state = AudioCaptureState.RUNNING
@@ -503,6 +521,16 @@ class AudioCapture:
             error_code=failure.code.value,
             error_reason=failure.reason,
         )
+
+    async def _close_failed_stream(self, stream: AudioStream) -> None:
+        """Close a backend handle that failed before capture became open."""
+
+        try:
+            await stream.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
 
     def _emit(
         self,
@@ -593,7 +621,10 @@ class SoundDeviceBackend:
                         name=str(raw.get("name", f"Input device {index}")),
                         is_default=index == default_input,
                         supported_formats=(
-                            AudioFormat(sample_rate=default_rate, channels=1),
+                            AudioFormat(
+                                sample_rate=default_rate,
+                                channels=max_input_channels,
+                            ),
                         ),
                     )
                 )
@@ -617,8 +648,14 @@ class SoundDeviceBackend:
         device = next((candidate for candidate in devices if candidate.id == device_id), None)
         if device is None:
             raise AudioBackendError(AudioErrorCode.NO_DEVICE, "selected input device is absent")
-        negotiated = requested_format or device.supported_formats[0]
-        if negotiated.channels != 1 or negotiated.sample_rate != device.supported_formats[0].sample_rate:
+        if not device.supported_formats:
+            raise AudioBackendError(
+                AudioErrorCode.UNSUPPORTED_FORMAT,
+                "input device has no advertised format",
+            )
+        default_format = device.supported_formats[0]
+        negotiated = requested_format or default_format
+        if negotiated.channels > default_format.channels:
             raise AudioBackendError(
                 AudioErrorCode.UNSUPPORTED_FORMAT,
                 "requested format is outside the host probe contract",
@@ -673,7 +710,7 @@ def default_audio_backend() -> AudioBackend:
 def _safe_device_id(device_id: str | None) -> str | None:
     if device_id is None:
         return None
-    return "<redacted-path>" if device_id.startswith("/") else device_id
+    return "<redacted-path>" if device_id.startswith("/") else "<redacted-device-id>"
 
 
 async def probe_audio(
@@ -685,12 +722,24 @@ async def probe_audio(
 
     selected_backend = backend or default_audio_backend()
     discovery = await AudioDeviceDiscovery(selected_backend).discover(selected_device_id)
+    safe_device_ids = {
+        device.id: f"<device-{index}>" for index, device in enumerate(discovery.devices)
+    }
     report: dict[str, object] = {
         "probe": "audio",
         "backend": type(selected_backend).__name__,
-        "devices": [device.to_safe_dict() for device in discovery.devices],
-        "default_device_id": _safe_device_id(discovery.default_device_id),
-        "selected_device_id": _safe_device_id(discovery.selected_device_id),
+        "devices": [
+            device.to_safe_dict(label=safe_device_ids[device.id])
+            for device in discovery.devices
+        ],
+        "default_device_id": (
+            safe_device_ids.get(discovery.default_device_id)
+            or _safe_device_id(discovery.default_device_id)
+        ),
+        "selected_device_id": (
+            safe_device_ids.get(discovery.selected_device_id)
+            or _safe_device_id(discovery.selected_device_id)
+        ),
         "capability": discovery.capability.to_dict(),
         "negotiated_format": None,
         "failure": discovery.failure.to_dict() if discovery.failure else None,

@@ -12,6 +12,7 @@ from voxflow.platform.audio import (
     AudioCaptureState,
     AudioDeviceDiscovery,
     AudioErrorCode,
+    SoundDeviceBackend,
 )
 from voxflow.platform.audio_devices import (
     AudioDevice,
@@ -53,7 +54,14 @@ class FakeStream:
 
 
 class FakeAudioBackend:
-    def __init__(self, *, devices=None, enumerate_error=None, open_error=None):
+    def __init__(
+        self,
+        *,
+        devices=None,
+        enumerate_error=None,
+        open_error=None,
+        opened_format=None,
+    ):
         self.devices = devices if devices is not None else (
             AudioDevice(
                 id="mic-1",
@@ -64,6 +72,7 @@ class FakeAudioBackend:
         )
         self.enumerate_error = enumerate_error
         self.open_error = open_error
+        self.opened_format = opened_format
         self.stream = FakeStream()
         self.opened_ids = []
 
@@ -79,7 +88,7 @@ class FakeAudioBackend:
         device = next(device for device in self.devices if device.id == device_id)
         return OpenedAudioStream(
             device=device,
-            format=requested_format or device.supported_formats[0],
+            format=self.opened_format or requested_format or device.supported_formats[0],
             stream=self.stream,
         )
 
@@ -259,3 +268,100 @@ def test_close_attempts_cleanup_after_disconnect_during_stop() -> None:
     assert not capture.has_active_stream
     assert events[-2].type is AudioEventType.CAPTURE_FAILED
     assert events[-1].type is AudioEventType.CAPTURE_CLOSED
+
+
+def test_open_validation_failure_closes_the_opened_stream() -> None:
+    async def scenario():
+        backend = FakeAudioBackend(opened_format=AudioFormat(16_000, 1))
+        capture = AudioCapture(backend, requested_format=FORMAT)
+        with pytest.raises(AudioCaptureError) as raised:
+            await capture.open()
+        return backend, capture, raised.value
+
+    backend, capture, error = asyncio.run(scenario())
+
+    assert error.failure.code is AudioErrorCode.UNSUPPORTED_FORMAT
+    assert backend.stream.closed
+    assert not capture.has_active_stream
+    assert capture.state is AudioCaptureState.FAILED
+
+
+def test_start_failure_closes_handle_and_reopen_does_not_retain_it() -> None:
+    async def scenario():
+        backend = FakeAudioBackend()
+        failed_stream = FakeStream(
+            start_error=AudioBackendError(
+                AudioErrorCode.BACKEND_UNAVAILABLE,
+                "start failed",
+            )
+        )
+        backend.stream = failed_stream
+        capture = AudioCapture(backend)
+        await capture.open()
+        with pytest.raises(AudioCaptureError):
+            await capture.start()
+        replacement_stream = FakeStream()
+        backend.stream = replacement_stream
+        await capture.open()
+        return capture, failed_stream, replacement_stream
+
+    capture, failed_stream, replacement_stream = asyncio.run(scenario())
+
+    assert failed_stream.closed
+    assert capture.has_active_stream
+    assert capture.state is AudioCaptureState.OPEN
+    assert capture._stream is replacement_stream
+
+
+class FakeSoundDeviceStream:
+    def start(self):
+        return None
+
+    def stop(self):
+        return None
+
+    def close(self):
+        return None
+
+
+class FakeSoundDeviceModule:
+    class default:
+        device = (0, -1)
+
+    def __init__(self):
+        self.input_stream_arguments = []
+
+    def query_devices(self):
+        return [
+            {
+                "name": "Stereo desk microphone",
+                "max_input_channels": 2,
+                "default_samplerate": 48_000,
+            }
+        ]
+
+    def InputStream(self, **arguments):
+        self.input_stream_arguments.append(arguments)
+        return FakeSoundDeviceStream()
+
+
+def test_sounddevice_backend_uses_max_input_channels_and_requested_format() -> None:
+    async def scenario():
+        sounddevice = FakeSoundDeviceModule()
+        backend = SoundDeviceBackend()
+        backend._sounddevice = sounddevice
+        devices = await backend.enumerate_devices()
+        opened_default = await backend.open("0")
+        opened_requested = await backend.open("0", AudioFormat(16_000, 1))
+        return devices, opened_default, opened_requested, sounddevice
+
+    devices, opened_default, opened_requested, sounddevice = asyncio.run(scenario())
+
+    assert devices[0].supported_formats == (AudioFormat(48_000, 2),)
+    assert opened_default.format == AudioFormat(48_000, 2)
+    assert opened_requested.format == AudioFormat(16_000, 1)
+    assert [arguments["channels"] for arguments in sounddevice.input_stream_arguments] == [
+        2,
+        1,
+    ]
+    assert all("callback" in arguments for arguments in sounddevice.input_stream_arguments)
