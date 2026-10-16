@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import secrets
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -21,6 +22,8 @@ PORTAL_BUS_NAME = "org.freedesktop.portal.Desktop"
 PORTAL_OBJECT_PATH = "/org/freedesktop/portal/desktop"
 GLOBAL_SHORTCUTS_INTERFACE = "org.freedesktop.portal.GlobalShortcuts"
 REQUEST_INTERFACE = "org.freedesktop.portal.Request"
+SESSION_INTERFACE = "org.freedesktop.portal.Session"
+MIN_GLOBAL_SHORTCUTS_VERSION = 2
 
 
 class PortalErrorCode(StrEnum):
@@ -31,6 +34,7 @@ class PortalErrorCode(StrEnum):
     CANCELLED = "cancelled"
     MALFORMED_RESPONSE = "malformed_response"
     REQUEST_FAILED = "request_failed"
+    UNSUPPORTED_VERSION = "unsupported_version"
 
 
 class PortalClientError(RuntimeError):
@@ -100,6 +104,10 @@ class PortalConnection(Protocol):
     async def call(self, method: str, *arguments: object) -> object: ...
 
     async def subscribe(self, signal: str, callback: SignalCallback) -> Unsubscribe: ...
+
+    async def close_session(self, session_handle: str) -> object: ...
+
+    async def close(self) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,30 +193,37 @@ def map_portal_error(error: BaseException, *, interface: str = GLOBAL_SHORTCUTS_
     if code is PortalErrorCode.PERMISSION_DENIED:
         status = CapabilityStatus.NEEDS_USER_ACTION
         reason = (
-            f"{interface} permission was denied ({detail}). Approve the desktop "
+            f"{interface} permission was denied. Approve the desktop "
             "portal request and try again."
         )
     elif code is PortalErrorCode.CANCELLED:
         status = CapabilityStatus.NEEDS_USER_ACTION
         reason = (
-            f"The {interface} request was cancelled ({detail}). Re-run the setup "
+            f"The {interface} request was cancelled. Re-run the setup "
             "and approve the shortcut request when prompted."
         )
     elif code is PortalErrorCode.SERVICE_UNAVAILABLE:
         status = CapabilityStatus.UNSUPPORTED
         reason = (
-            f"{interface} is unavailable ({detail}). Use a desktop portal backend "
+            f"{interface} is unavailable. Use a desktop portal backend "
             "that implements GlobalShortcuts version 2."
+        )
+    elif code is PortalErrorCode.UNSUPPORTED_VERSION:
+        status = CapabilityStatus.UNSUPPORTED
+        reason = (
+            f"{interface} does not provide the required version "
+            f"{MIN_GLOBAL_SHORTCUTS_VERSION}. Upgrade or select a desktop portal "
+            "backend that implements GlobalShortcuts version 2."
         )
     elif code is PortalErrorCode.MALFORMED_RESPONSE:
         status = CapabilityStatus.UNSUPPORTED
         reason = (
-            f"{interface} returned a malformed response ({detail}). Check the "
+            f"{interface} returned a malformed response. Check the "
             "portal backend version before enabling global shortcuts."
         )
     else:
         status = CapabilityStatus.UNSUPPORTED
-        reason = f"{interface} request failed ({detail}). Check the desktop portal logs."
+        reason = f"{interface} request failed. Check the desktop portal logs."
 
     return PortalFailure(code=code, status=status, reason=reason)
 
@@ -314,11 +329,25 @@ def _unwrap_dbus_value(value: object) -> object:
     return value
 
 
+def _request_token(kind: str) -> str:
+    """Return a unique, valid object-path token for one portal request."""
+
+    return f"voxflow_{kind}_{secrets.token_hex(16)}"
+
+
 class GlobalShortcutsPortal:
     """Portal client for probing and using one GlobalShortcuts session."""
 
-    def __init__(self, connection: PortalConnection | None = None) -> None:
+    def __init__(
+        self,
+        connection: PortalConnection | None = None,
+        *,
+        close_session: Callable[[str], object] | None = None,
+        close: Callable[[], object] | None = None,
+    ) -> None:
         self.connection = connection or DbusNextPortalConnection()
+        self._close_session_boundary = close_session
+        self._close_boundary = close
 
     async def probe(self) -> PortalProbeResult:
         """Introspect GlobalShortcuts without creating a session or binding keys."""
@@ -332,6 +361,24 @@ class GlobalShortcutsPortal:
             description = _description_from_mapping(raw)
             methods = tuple(sorted(description.methods))
             signals = tuple(sorted(description.signals))
+            if (
+                description.version is None
+                or description.version < MIN_GLOBAL_SHORTCUTS_VERSION
+            ):
+                failure = map_portal_error(
+                    PortalClientError(
+                        PortalErrorCode.UNSUPPORTED_VERSION,
+                        "GlobalShortcuts version is missing or older than version 2",
+                    )
+                )
+                return PortalProbeResult(
+                    interface=description.interface,
+                    version=description.version,
+                    methods=methods,
+                    signals=signals,
+                    capabilities=(capability_for_failure(failure),),
+                    failure=failure,
+                )
             required_methods = {"CreateSession", "BindShortcuts"}
             if not required_methods.issubset(description.methods):
                 failure = map_portal_error(
@@ -387,9 +434,7 @@ class GlobalShortcutsPortal:
                 signals=signals,
                 capabilities=(global_capability, hold_capability),
             )
-        except asyncio.CancelledError as exc:
-            failure = map_portal_error(exc)
-        except BaseException as exc:
+        except Exception as exc:
             failure = map_portal_error(exc)
         return PortalProbeResult(
             interface=GLOBAL_SHORTCUTS_INTERFACE,
@@ -403,18 +448,22 @@ class GlobalShortcutsPortal:
     async def create_session(self) -> str:
         """Create a portal session and return its object path."""
 
-        token = "voxflow_session"
+        handle_token = _request_token("request")
+        session_handle_token = _request_token("session")
         try:
             response = await self.connection.call(
                 "CreateSession",
-                {"handle_token": token, "session_handle_token": token},
+                {
+                    "handle_token": handle_token,
+                    "session_handle_token": session_handle_token,
+                },
             )
             return _extract_string(response, field="session_handle")
         except asyncio.CancelledError:
             raise
         except PortalClientError:
             raise
-        except BaseException as exc:
+        except Exception as exc:
             failure = map_portal_error(exc)
             raise PortalClientError(failure.code, failure.reason) from exc
 
@@ -441,14 +490,14 @@ class GlobalShortcutsPortal:
                 session_handle,
                 ((shortcut_id, properties),),
                 "",
-                {},
+                {"handle_token": _request_token("bind")},
             )
             return _extract_shortcuts(response)
         except asyncio.CancelledError:
             raise
         except PortalClientError:
             raise
-        except BaseException as exc:
+        except Exception as exc:
             failure = map_portal_error(exc)
             raise PortalClientError(failure.code, failure.reason) from exc
 
@@ -458,6 +507,54 @@ class GlobalShortcutsPortal:
         if signal not in {"Activated", "Deactivated", "ShortcutsChanged"}:
             raise ValueError(f"unsupported GlobalShortcuts signal: {signal}")
         return await self.connection.subscribe(signal, callback)
+
+    async def close_session(self, session_handle: str) -> None:
+        """Release a session when the transport exposes the shared close API.
+
+        Older or minimal injected transports may not implement this boundary.
+        In that case the local adapter still clears its state, while the
+        transport's documented limitation is that the desktop session can only
+        be reclaimed when the client disappears from D-Bus.
+        """
+
+        if not session_handle.strip():
+            raise ValueError("session_handle must not be blank")
+        closer = self._close_session_boundary
+        if closer is None:
+            closer = getattr(self.connection, "close_session", None)
+        if closer is None:
+            return
+        try:
+            result = closer(session_handle)
+            if inspect.isawaitable(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except PortalClientError:
+            raise
+        except Exception as exc:
+            failure = map_portal_error(exc, interface=SESSION_INTERFACE)
+            raise PortalClientError(failure.code, failure.reason) from exc
+
+    async def close(self) -> None:
+        """Close the injectable transport if it provides a close boundary."""
+
+        closer = self._close_boundary
+        if closer is None:
+            closer = getattr(self.connection, "close", None)
+        if closer is None:
+            return
+        try:
+            result = closer()
+            if inspect.isawaitable(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except PortalClientError:
+            raise
+        except Exception as exc:
+            failure = map_portal_error(exc, interface=SESSION_INTERFACE)
+            raise PortalClientError(failure.code, failure.reason) from exc
 
 
 class DbusNextPortalConnection:
@@ -501,9 +598,9 @@ class DbusNextPortalConnection:
             return self._portal_interface
         except PortalClientError:
             raise
-        except BaseException as exc:
+        except Exception as exc:
             failure = map_portal_error(exc)
-            raise PortalClientError(failure.code, failure.detail if hasattr(failure, "detail") else failure.reason) from exc
+            raise PortalClientError(failure.code, failure.reason) from exc
 
     async def introspect(
         self,
@@ -600,7 +697,7 @@ class DbusNextPortalConnection:
             introspection = await self._bus.introspect(PORTAL_BUS_NAME, request_path)
             proxy = self._bus.get_proxy_object(PORTAL_BUS_NAME, request_path, introspection)
             request = proxy.get_interface(REQUEST_INTERFACE)
-        except BaseException as exc:
+        except Exception as exc:
             failure = map_portal_error(exc)
             raise PortalClientError(failure.code, failure.reason) from exc
 
@@ -653,6 +750,60 @@ class DbusNextPortalConnection:
 
         return unsubscribe
 
+    async def close_session(self, session_handle: str) -> None:
+        """Close a GlobalShortcuts session through org.freedesktop.portal.Session."""
+
+        if not session_handle.strip():
+            raise ValueError("session_handle must not be blank")
+        if self._bus is None:
+            return
+        try:
+            introspection = await self._bus.introspect(
+                PORTAL_BUS_NAME,
+                session_handle,
+            )
+            proxy = self._bus.get_proxy_object(
+                PORTAL_BUS_NAME,
+                session_handle,
+                introspection,
+            )
+            session = proxy.get_interface(SESSION_INTERFACE)
+            close = getattr(session, "call_close", None)
+            if close is None:
+                raise PortalClientError(
+                    PortalErrorCode.MALFORMED_RESPONSE,
+                    "portal session close method is not available",
+                )
+            await close()
+        except asyncio.CancelledError:
+            raise
+        except PortalClientError:
+            raise
+        except Exception as exc:
+            failure = map_portal_error(exc, interface=SESSION_INTERFACE)
+            raise PortalClientError(failure.code, failure.reason) from exc
+
+    async def close(self) -> None:
+        """Disconnect the D-Bus transport and forget proxy state."""
+
+        bus = self._bus
+        self._bus = None
+        self._portal_interface = None
+        self._portal_proxy = None
+        if bus is None:
+            return
+        try:
+            disconnect = getattr(bus, "disconnect", None)
+            if disconnect is not None:
+                result = disconnect()
+                if inspect.isawaitable(result):
+                    await result
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            failure = map_portal_error(exc, interface=SESSION_INTERFACE)
+            raise PortalClientError(failure.code, failure.reason) from exc
+
 
 class UnavailablePortalConnection:
     """Explicit fake transport for callers that want no live desktop access."""
@@ -679,3 +830,9 @@ class UnavailablePortalConnection:
             PortalErrorCode.SERVICE_UNAVAILABLE,
             f"no connection is available for {GLOBAL_SHORTCUTS_INTERFACE}",
         )
+
+    async def close_session(self, session_handle: str) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None

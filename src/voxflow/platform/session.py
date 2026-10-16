@@ -83,10 +83,13 @@ def detect_session(environment: Mapping[str, str] | None = None) -> SessionInfo:
     wayland_present = bool(values.get("WAYLAND_DISPLAY", "").strip())
     x11_present = bool(values.get("DISPLAY", "").strip())
 
-    if declared == SessionType.WAYLAND.value:
-        detected = SessionType.WAYLAND
-    elif declared in {SessionType.X11.value, "xorg"}:
-        detected = SessionType.X11
+    if declared is not None:
+        if declared == SessionType.WAYLAND.value:
+            detected = SessionType.WAYLAND
+        elif declared in {SessionType.X11.value, "xorg"}:
+            detected = SessionType.X11
+        else:
+            detected = SessionType.UNKNOWN
     elif wayland_present:
         detected = SessionType.WAYLAND
     elif x11_present:
