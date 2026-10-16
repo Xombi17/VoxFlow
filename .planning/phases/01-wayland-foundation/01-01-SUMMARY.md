@@ -82,7 +82,7 @@ Each task was committed atomically:
 2. **Task 2: Implement typed state and capability contracts** - `f98ad8b` (`feat`)
 3. **Task 3: Add deterministic core tests and diagnostic output** - `834c2e5` (`test`)
 
-**Plan metadata:** pending summary metadata commit.
+**Plan metadata:** `15c58a9` (`docs`: summary, state, roadmap, and requirement metadata).
 
 ## Files Created/Modified
 
