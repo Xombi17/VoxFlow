@@ -1,5 +1,5 @@
-PYTHON ?= python3.12
-PYTHONPATH ?= src
+PYTHON ?= python3
+PYTHONPATH := src
 
 .PHONY: test lint
 
