@@ -702,7 +702,7 @@ async def probe_audio(
             status=CapabilityStatus.AVAILABLE,
             reason=(
                 "The selected input device opened successfully. The probe did not "
-                "start capture or retain audio samples."
+                "start capture or retain audio data."
             ),
         ).to_dict()
     except AudioCaptureError as exc:

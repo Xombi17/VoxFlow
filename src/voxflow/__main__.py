@@ -11,6 +11,7 @@ from typing import Sequence
 from . import APP_NAME, __version__
 from .core.capabilities import CapabilityRecord
 from .core.state import SessionStateMachine
+from .platform.audio import probe_audio
 from .platform.portals import GlobalShortcutsPortal, PortalProbeResult
 from .platform.session import SessionInfo, detect_session
 
@@ -53,6 +54,12 @@ def platform_diagnostic(
     }
 
 
+def audio_platform_diagnostic() -> dict[str, object]:
+    """Run the opt-in audio probe without changing the default diagnostic."""
+
+    return asyncio.run(probe_audio())
+
+
 def recommended_next_action(
     session_info: SessionInfo,
     portal_result: PortalProbeResult,
@@ -85,24 +92,51 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="include live session and GlobalShortcuts portal findings",
     )
+    parser.add_argument(
+        "--probe-audio",
+        action="store_true",
+        help="include live microphone discovery and open/close findings",
+    )
     arguments = parser.parse_args(argv)
-    if arguments.probe_portals:
-        platform = platform_diagnostic()
-        capabilities = [
-            CapabilityRecord(
-                id=platform["session_capability"]["id"],
-                status=platform["session_capability"]["status"],
-                reason=platform["session_capability"]["reason"],
+    if arguments.probe_portals or arguments.probe_audio:
+        platform: dict[str, object] = {}
+        if arguments.probe_portals:
+            platform.update(platform_diagnostic())
+        if arguments.probe_audio:
+            platform["audio"] = audio_platform_diagnostic()
+
+        capabilities: list[CapabilityRecord] = []
+        if "session_capability" in platform:
+            session_capability = platform["session_capability"]
+            assert isinstance(session_capability, dict)
+            capabilities.append(
+                CapabilityRecord(
+                    id=session_capability["id"],
+                    status=session_capability["status"],
+                    reason=session_capability["reason"],
+                )
             )
-        ]
-        capabilities.extend(
-            CapabilityRecord(
-                id=capability["id"],
-                status=capability["status"],
-                reason=capability["reason"],
+        if "portal" in platform:
+            portal = platform["portal"]
+            assert isinstance(portal, dict)
+            capabilities.extend(
+                CapabilityRecord(
+                    id=capability["id"],
+                    status=capability["status"],
+                    reason=capability["reason"],
+                )
+                for capability in portal["capabilities"]
             )
-            for capability in platform["portal"]["capabilities"]
-        )
+        if "audio" in platform:
+            audio = platform["audio"]
+            assert isinstance(audio, dict)
+            capabilities.append(
+                CapabilityRecord(
+                    id=audio["capability"]["id"],
+                    status=audio["capability"]["status"],
+                    reason=audio["capability"]["reason"],
+                )
+            )
         print(json.dumps(diagnostic(capabilities, platform=platform), sort_keys=True))
     else:
         print(json.dumps(diagnostic(), sort_keys=True))
