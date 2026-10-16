@@ -145,6 +145,17 @@ def test_portal_failure_reason_does_not_expose_backend_details() -> None:
     assert "Check the desktop portal logs" in result.failure.reason
 
 
+def test_raw_portal_exception_details_are_not_user_facing() -> None:
+    secret = "dbus socket /private/path: backend traceback"
+    result = asyncio.run(
+        GlobalShortcutsPortal(FakePortalConnection(error=RuntimeError(secret))).probe()
+    )
+
+    assert result.failure is not None
+    assert result.failure.code is PortalErrorCode.REQUEST_FAILED
+    assert secret not in result.failure.reason
+
+
 def test_permission_denial_is_not_a_raw_exception() -> None:
     error = PortalClientError(PortalErrorCode.PERMISSION_DENIED, "user denied")
     result = asyncio.run(GlobalShortcutsPortal(FakePortalConnection(error=error)).probe())
