@@ -8,37 +8,39 @@ transports remain optional host capabilities.
 ## Runtime and setup
 
 The project targets Python 3.12. The runtime pin is in `.python-version` and
-the dependency lockfile is `uv.lock`.
+the dependency lockfile is `uv.lock`. Pytest is pinned as project dev tooling.
 
-With a cached Python 3.12 runtime:
+From a clean checkout, install the project-local environment and dev tooling:
 
 ```bash
 uv venv --python 3.12
+uv sync --dev
 ```
 
 The Phase 1 package has no required runtime dependencies. `dbus-next` and
 `sounddevice` are optional host transports and are intentionally not required
-by the offline suite.
+by the offline suite. `uv sync --dev` installs the pinned pytest test tool.
 
 ## Test and checks
 
 ```bash
-make test
+NETWORK_DISABLED=1 make test
 make lint
 ```
 
-`make test` first tries the project-local `.venv` through uv with
-`--offline --no-sync`, so it never downloads dependencies. If pytest is not
-cached there, it uses the configured `PYTHON` command as an explicit host
-fallback and prints that choice. No pytest version is claimed by the lockfile
-unless it is actually available in the project environment.
+After setup, `make test` uses only `.venv/bin/python` through uv with
+`--offline --no-sync`; it rejects a missing environment or a Python version
+outside `>=3.12,<3.13` rather than falling back to an arbitrary host Python.
 
 For the full Phase 1 verification commands:
 
 ```bash
-PYTHONPATH=src python3 -m compileall -q src tests tools
-PYTHONPATH=src python3 tools/portal_probe.py --json
-PYTHONPATH=src python3 tools/audio_probe.py --json
+PYTHONPATH=src uv run --offline --no-sync --python .venv/bin/python \
+  python -m compileall -q src tests tools
+PYTHONPATH=src uv run --offline --no-sync --python .venv/bin/python \
+  python tools/portal_probe.py --json
+PYTHONPATH=src uv run --offline --no-sync --python .venv/bin/python \
+  python tools/audio_probe.py --json
 git diff --check
 ```
 
@@ -51,14 +53,16 @@ raw device identifiers.
 The provider-free diagnostic is:
 
 ```bash
-PYTHONPATH=src python3 -m voxflow --json
+PYTHONPATH=src uv run --offline --no-sync --python .venv/bin/python \
+  python -m voxflow --json
 ```
 
 Opt into host capability probes only when running from the target desktop
 session:
 
 ```bash
-PYTHONPATH=src python3 -m voxflow --json --probe-portals --probe-audio
+PYTHONPATH=src uv run --offline --no-sync --python .venv/bin/python \
+  python -m voxflow --json --probe-portals --probe-audio
 ```
 
 ## Deployment
