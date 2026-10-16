@@ -309,12 +309,19 @@ class AudioCapture:
         backend: AudioBackend,
         *,
         selected_device_id: str | None = None,
+        requested_format: AudioFormat | None = None,
         config: AudioCaptureConfig | None = None,
+        max_buffer_frames: int = 128,
         listener: EventListener | None = None,
     ) -> None:
+        if config is not None and requested_format is not None:
+            raise ValueError("use config or requested_format, not both")
         self.backend = backend
         self.selected_device_id = selected_device_id
-        self.config = config or AudioCaptureConfig()
+        self.config = config or AudioCaptureConfig(
+            requested_format=requested_format,
+            max_buffer_frames=max_buffer_frames,
+        )
         self._listeners: list[EventListener] = []
         if listener is not None:
             self._listeners.append(listener)
@@ -594,8 +601,9 @@ class SoundDeviceBackend:
         except AudioBackendError:
             raise
         except Exception as exc:
+            failure = map_audio_error(exc)
             raise AudioBackendError(
-                AudioErrorCode.BACKEND_UNAVAILABLE,
+                failure.code,
                 "sounddevice could not enumerate input devices",
             ) from exc
 
@@ -628,8 +636,9 @@ class SoundDeviceBackend:
                 callback=discard_frames,
             )
         except Exception as exc:
+            failure = map_audio_error(exc)
             raise AudioBackendError(
-                AudioErrorCode.BACKEND_UNAVAILABLE,
+                failure.code,
                 "sounddevice could not open the selected input device",
             ) from exc
         return OpenedAudioStream(
