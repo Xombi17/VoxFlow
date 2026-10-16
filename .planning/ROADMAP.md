@@ -36,7 +36,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02: Implement Ubuntu GNOME Wayland capability probes and GlobalShortcuts/permission spike.
+- [x] 01-02: Implement Ubuntu GNOME Wayland capability probes and GlobalShortcuts/permission spike.
 - [ ] 01-03: Implement microphone discovery/capture probe and document the validated host integration matrix.
 
 ### Phase 2: Local Dictation Engine
@@ -131,7 +131,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Wayland Foundation | 1/3 | In Progress|  |
+| 1. Wayland Foundation | 2/3 | In Progress|  |
 | 2. Local Dictation Engine | 0/3 | Not started | - |
 | 3. Writing Pipeline | 0/3 | Not started | - |
 | 4. Insert and Recover | 0/3 | Not started | - |

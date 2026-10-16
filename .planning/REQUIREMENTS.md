@@ -90,7 +90,7 @@ Deferred until the v1 dictation loop is reliable.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PLAT-01 | Phase 1 | Complete |
-| PLAT-02 | Phase 1 | Pending |
+| PLAT-02 | Phase 1 | Implemented; live portal validation pending |
 | PLAT-03 | Phase 1 | Complete |
 | AUDIO-01 | Phase 1 | Pending |
 | AUDIO-02 | Phase 2 | Pending |
