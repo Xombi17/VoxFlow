@@ -1,0 +1,670 @@
+"""Typed, injectable access to the XDG GlobalShortcuts portal.
+
+The core client talks to a small async connection protocol.  This keeps the
+offline test suite independent of D-Bus and lets a host install an optional
+``dbus-next`` bridge without making it a runtime dependency of VoxFlow.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import re
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any, Protocol
+
+from ..core.capabilities import CapabilityRecord, CapabilityStatus
+
+PORTAL_BUS_NAME = "org.freedesktop.portal.Desktop"
+PORTAL_OBJECT_PATH = "/org/freedesktop/portal/desktop"
+GLOBAL_SHORTCUTS_INTERFACE = "org.freedesktop.portal.GlobalShortcuts"
+REQUEST_INTERFACE = "org.freedesktop.portal.Request"
+
+
+class PortalErrorCode(StrEnum):
+    """Stable failure codes emitted by portal capability probes."""
+
+    SERVICE_UNAVAILABLE = "service_unavailable"
+    PERMISSION_DENIED = "permission_denied"
+    CANCELLED = "cancelled"
+    MALFORMED_RESPONSE = "malformed_response"
+    REQUEST_FAILED = "request_failed"
+
+
+class PortalClientError(RuntimeError):
+    """A normalized portal failure with a stable machine-readable code."""
+
+    def __init__(
+        self,
+        code: PortalErrorCode,
+        detail: str,
+        *,
+        dbus_name: str | None = None,
+    ) -> None:
+        self.code = PortalErrorCode(code)
+        self.detail = detail.strip() or self.code.value
+        self.dbus_name = dbus_name
+        super().__init__(self.detail)
+
+
+@dataclass(frozen=True, slots=True)
+class PortalFailure:
+    """A normalized error suitable for a capability record or diagnostic."""
+
+    code: PortalErrorCode
+    status: CapabilityStatus
+    reason: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "code": self.code.value,
+            "status": self.status.value,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PortalInterfaceDescription:
+    """The subset of D-Bus introspection needed by the shortcut adapter."""
+
+    interface: str = GLOBAL_SHORTCUTS_INTERFACE
+    version: int | None = None
+    methods: frozenset[str] = frozenset()
+    signals: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        if not self.interface.strip():
+            raise ValueError("portal interface must not be blank")
+        if self.version is not None and self.version < 0:
+            raise ValueError("portal interface version must not be negative")
+        object.__setattr__(self, "methods", frozenset(self.methods))
+        object.__setattr__(self, "signals", frozenset(self.signals))
+
+
+SignalCallback = Callable[..., object]
+Unsubscribe = Callable[[], object]
+
+
+class PortalConnection(Protocol):
+    """Minimal async D-Bus boundary implemented by real and fake transports."""
+
+    async def introspect(
+        self,
+        bus_name: str,
+        object_path: str,
+        interface: str,
+    ) -> PortalInterfaceDescription | Mapping[str, object]: ...
+
+    async def call(self, method: str, *arguments: object) -> object: ...
+
+    async def subscribe(self, signal: str, callback: SignalCallback) -> Unsubscribe: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PortalProbeResult:
+    """Serializable result of inspecting GlobalShortcuts."""
+
+    interface: str
+    version: int | None
+    methods: tuple[str, ...]
+    signals: tuple[str, ...]
+    capabilities: tuple[CapabilityRecord, ...]
+    failure: PortalFailure | None = None
+
+    @property
+    def capability(self) -> CapabilityRecord:
+        """Compatibility convenience for callers checking the primary feature."""
+
+        return self.capabilities[0]
+
+    @property
+    def supported(self) -> bool:
+        return self.capability.status is CapabilityStatus.AVAILABLE
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "interface": self.interface,
+            "version": self.version,
+            "methods": list(self.methods),
+            "signals": list(self.signals),
+            "capabilities": [capability.to_dict() for capability in self.capabilities],
+            "failure": self.failure.to_dict() if self.failure else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BoundShortcut:
+    """A shortcut returned by a successful portal binding request."""
+
+    id: str
+    description: str
+    trigger_description: str
+
+
+def map_portal_error(error: BaseException, *, interface: str = GLOBAL_SHORTCUTS_INTERFACE) -> PortalFailure:
+    """Map transport/D-Bus failures to actionable, typed capability results."""
+
+    if isinstance(error, PortalClientError):
+        code = error.code
+        detail = error.detail
+    else:
+        name = str(getattr(error, "name", "")).lower()
+        detail = str(error).strip() or error.__class__.__name__
+        text = f"{name} {detail}".lower()
+        if isinstance(error, asyncio.CancelledError) or "cancel" in text:
+            code = PortalErrorCode.CANCELLED
+        elif any(
+            marker in text
+            for marker in (
+                "accessdenied",
+                "permission",
+                "not allowed",
+                "denied",
+            )
+        ):
+            code = PortalErrorCode.PERMISSION_DENIED
+        elif any(
+            marker in text
+            for marker in (
+                "serviceunknown",
+                "name has no owner",
+                "not found",
+                "unavailable",
+                "dbus-next is not installed",
+            )
+        ):
+            code = PortalErrorCode.SERVICE_UNAVAILABLE
+        elif isinstance(error, (TypeError, KeyError, ValueError)):
+            code = PortalErrorCode.MALFORMED_RESPONSE
+        else:
+            code = PortalErrorCode.REQUEST_FAILED
+
+    if code is PortalErrorCode.PERMISSION_DENIED:
+        status = CapabilityStatus.NEEDS_USER_ACTION
+        reason = (
+            f"{interface} permission was denied ({detail}). Approve the desktop "
+            "portal request and try again."
+        )
+    elif code is PortalErrorCode.CANCELLED:
+        status = CapabilityStatus.NEEDS_USER_ACTION
+        reason = (
+            f"The {interface} request was cancelled ({detail}). Re-run the setup "
+            "and approve the shortcut request when prompted."
+        )
+    elif code is PortalErrorCode.SERVICE_UNAVAILABLE:
+        status = CapabilityStatus.UNSUPPORTED
+        reason = (
+            f"{interface} is unavailable ({detail}). Use a desktop portal backend "
+            "that implements GlobalShortcuts version 2."
+        )
+    elif code is PortalErrorCode.MALFORMED_RESPONSE:
+        status = CapabilityStatus.UNSUPPORTED
+        reason = (
+            f"{interface} returned a malformed response ({detail}). Check the "
+            "portal backend version before enabling global shortcuts."
+        )
+    else:
+        status = CapabilityStatus.UNSUPPORTED
+        reason = f"{interface} request failed ({detail}). Check the desktop portal logs."
+
+    return PortalFailure(code=code, status=status, reason=reason)
+
+
+def capability_for_failure(
+    failure: PortalFailure,
+    *,
+    capability_id: str = "shortcut.global",
+) -> CapabilityRecord:
+    """Turn a normalized portal failure into the shared core capability type."""
+
+    return CapabilityRecord(
+        id=capability_id,
+        status=failure.status,
+        reason=failure.reason,
+    )
+
+
+def _description_from_mapping(
+    value: PortalInterfaceDescription | Mapping[str, object],
+) -> PortalInterfaceDescription:
+    if isinstance(value, PortalInterfaceDescription):
+        return value
+    try:
+        raw_version = value.get("version")
+        version = None if raw_version is None else int(raw_version)
+        methods = value.get("methods", ())
+        signals = value.get("signals", ())
+        if isinstance(methods, (str, bytes)) or isinstance(signals, (str, bytes)):
+            raise TypeError("methods and signals must be sequences")
+        return PortalInterfaceDescription(
+            interface=str(value.get("interface", GLOBAL_SHORTCUTS_INTERFACE)),
+            version=version,
+            methods=frozenset(str(item) for item in methods),
+            signals=frozenset(str(item) for item in signals),
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise PortalClientError(
+            PortalErrorCode.MALFORMED_RESPONSE,
+            f"invalid interface description: {exc}",
+        ) from exc
+
+
+def _extract_string(value: object, *, field: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value
+    if isinstance(value, Mapping):
+        candidate = value.get(field)
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+    raise PortalClientError(
+        PortalErrorCode.MALFORMED_RESPONSE,
+        f"portal response did not contain a non-empty {field}",
+    )
+
+
+def _extract_shortcuts(value: object) -> tuple[BoundShortcut, ...]:
+    if isinstance(value, Mapping):
+        value = value.get("shortcuts")
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise PortalClientError(
+            PortalErrorCode.MALFORMED_RESPONSE,
+            "portal response did not contain a shortcuts sequence",
+        )
+
+    bound: list[BoundShortcut] = []
+    for item in value:
+        if not isinstance(item, Sequence) or len(item) != 2:
+            raise PortalClientError(
+                PortalErrorCode.MALFORMED_RESPONSE,
+                "portal shortcut entry must be a two-item sequence",
+            )
+        shortcut_id, properties = item
+        if not isinstance(shortcut_id, str) or not isinstance(properties, Mapping):
+            raise PortalClientError(
+                PortalErrorCode.MALFORMED_RESPONSE,
+                "portal shortcut entry has invalid ID or properties",
+            )
+        description = properties.get("description", "")
+        trigger = properties.get("trigger_description", "")
+        if not isinstance(description, str) or not isinstance(trigger, str):
+            raise PortalClientError(
+                PortalErrorCode.MALFORMED_RESPONSE,
+                "portal shortcut descriptions must be strings",
+            )
+        bound.append(
+            BoundShortcut(
+                id=shortcut_id,
+                description=description,
+                trigger_description=trigger,
+            )
+        )
+    return tuple(bound)
+
+
+class GlobalShortcutsPortal:
+    """Portal client for probing and using one GlobalShortcuts session."""
+
+    def __init__(self, connection: PortalConnection | None = None) -> None:
+        self.connection = connection or DbusNextPortalConnection()
+
+    async def probe(self) -> PortalProbeResult:
+        """Introspect GlobalShortcuts without creating a session or binding keys."""
+
+        try:
+            raw = await self.connection.introspect(
+                PORTAL_BUS_NAME,
+                PORTAL_OBJECT_PATH,
+                GLOBAL_SHORTCUTS_INTERFACE,
+            )
+            description = _description_from_mapping(raw)
+            methods = tuple(sorted(description.methods))
+            signals = tuple(sorted(description.signals))
+            required_methods = {"CreateSession", "BindShortcuts"}
+            if not required_methods.issubset(description.methods):
+                failure = map_portal_error(
+                    PortalClientError(
+                        PortalErrorCode.MALFORMED_RESPONSE,
+                        "required CreateSession or BindShortcuts method is missing",
+                    )
+                )
+                return PortalProbeResult(
+                    interface=description.interface,
+                    version=description.version,
+                    methods=methods,
+                    signals=signals,
+                    capabilities=(capability_for_failure(failure),),
+                    failure=failure,
+                )
+
+            global_capability = CapabilityRecord(
+                id="shortcut.global",
+                status=CapabilityStatus.AVAILABLE,
+                reason=(
+                    f"{GLOBAL_SHORTCUTS_INTERFACE} is available"
+                    + (
+                        f" at version {description.version}."
+                        if description.version is not None
+                        else "."
+                    )
+                    + " Bind a shortcut through the desktop portal before use."
+                ),
+            )
+            if "Activated" in description.signals and "Deactivated" in description.signals:
+                hold_capability = CapabilityRecord(
+                    id="shortcut.hold",
+                    status=CapabilityStatus.NEEDS_USER_ACTION,
+                    reason=(
+                        "Activation and deactivation signals are exposed. Run the "
+                        "binding smoke test to confirm hold/release behavior."
+                    ),
+                )
+            else:
+                hold_capability = CapabilityRecord(
+                    id="shortcut.hold",
+                    status=CapabilityStatus.UNSUPPORTED,
+                    reason=(
+                        "The portal does not expose both Activated and Deactivated; "
+                        "push-to-talk hold/release is unavailable, so use toggle behavior."
+                    ),
+                )
+            return PortalProbeResult(
+                interface=description.interface,
+                version=description.version,
+                methods=methods,
+                signals=signals,
+                capabilities=(global_capability, hold_capability),
+            )
+        except asyncio.CancelledError as exc:
+            failure = map_portal_error(exc)
+        except BaseException as exc:
+            failure = map_portal_error(exc)
+        return PortalProbeResult(
+            interface=GLOBAL_SHORTCUTS_INTERFACE,
+            version=None,
+            methods=(),
+            signals=(),
+            capabilities=(capability_for_failure(failure),),
+            failure=failure,
+        )
+
+    async def create_session(self) -> str:
+        """Create a portal session and return its object path."""
+
+        token = "voxflow_session"
+        try:
+            response = await self.connection.call(
+                "CreateSession",
+                {"handle_token": token, "session_handle_token": token},
+            )
+            return _extract_string(response, field="session_handle")
+        except asyncio.CancelledError:
+            raise
+        except PortalClientError:
+            raise
+        except BaseException as exc:
+            failure = map_portal_error(exc)
+            raise PortalClientError(failure.code, failure.reason) from exc
+
+    async def bind_shortcut(
+        self,
+        session_handle: str,
+        *,
+        shortcut_id: str,
+        description: str,
+        preferred_trigger: str | None = None,
+    ) -> tuple[BoundShortcut, ...]:
+        """Perform the portal's one-time binding request for one shortcut."""
+
+        if not session_handle.strip():
+            raise ValueError("session_handle must not be blank")
+        if not shortcut_id.strip() or not description.strip():
+            raise ValueError("shortcut ID and description must not be blank")
+        properties: dict[str, str] = {"description": description}
+        if preferred_trigger:
+            properties["preferred_trigger"] = preferred_trigger
+        try:
+            response = await self.connection.call(
+                "BindShortcuts",
+                session_handle,
+                ((shortcut_id, properties),),
+                "",
+                {},
+            )
+            return _extract_shortcuts(response)
+        except asyncio.CancelledError:
+            raise
+        except PortalClientError:
+            raise
+        except BaseException as exc:
+            failure = map_portal_error(exc)
+            raise PortalClientError(failure.code, failure.reason) from exc
+
+    async def subscribe(self, signal: str, callback: SignalCallback) -> Unsubscribe:
+        """Subscribe to one portal signal through the injected connection."""
+
+        if signal not in {"Activated", "Deactivated", "ShortcutsChanged"}:
+            raise ValueError(f"unsupported GlobalShortcuts signal: {signal}")
+        return await self.connection.subscribe(signal, callback)
+
+
+class DbusNextPortalConnection:
+    """Optional lazy ``dbus-next`` transport for a live desktop probe.
+
+    ``dbus-next`` is intentionally not a package dependency for the offline
+    core.  If it is not installed, calls return the same typed unavailable
+    result as any other missing portal service.
+    """
+
+    def __init__(self) -> None:
+        self._bus: Any | None = None
+        self._portal_interface: Any | None = None
+        self._portal_proxy: Any | None = None
+
+    async def _load_portal_interface(self) -> Any:
+        if self._portal_interface is not None:
+            return self._portal_interface
+        try:
+            from dbus_next.aio import MessageBus  # type: ignore[import-not-found]
+            from dbus_next.constants import BusType  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise PortalClientError(
+                PortalErrorCode.SERVICE_UNAVAILABLE,
+                "dbus-next is not installed for the live portal transport",
+            ) from exc
+        try:
+            self._bus = await MessageBus(bus_type=BusType.SESSION).connect()
+            introspection = await self._bus.introspect(
+                PORTAL_BUS_NAME,
+                PORTAL_OBJECT_PATH,
+            )
+            self._portal_proxy = self._bus.get_proxy_object(
+                PORTAL_BUS_NAME,
+                PORTAL_OBJECT_PATH,
+                introspection,
+            )
+            self._portal_interface = self._portal_proxy.get_interface(
+                GLOBAL_SHORTCUTS_INTERFACE
+            )
+            return self._portal_interface
+        except PortalClientError:
+            raise
+        except BaseException as exc:
+            failure = map_portal_error(exc)
+            raise PortalClientError(failure.code, failure.detail if hasattr(failure, "detail") else failure.reason) from exc
+
+    async def introspect(
+        self,
+        bus_name: str,
+        object_path: str,
+        interface: str,
+    ) -> PortalInterfaceDescription:
+        """Read interface members and the live ``version`` property."""
+
+        if (bus_name, object_path, interface) != (
+            PORTAL_BUS_NAME,
+            PORTAL_OBJECT_PATH,
+            GLOBAL_SHORTCUTS_INTERFACE,
+        ):
+            raise ValueError("unsupported portal introspection target")
+        iface = await self._load_portal_interface()
+        try:
+            version = await iface.get_version()
+        except AttributeError:
+            version = None
+        methods = set()
+        signals = set()
+        node = getattr(self._portal_proxy, "introspection", None)
+        for item in getattr(node, "interfaces", ()):
+            if getattr(item, "name", None) != GLOBAL_SHORTCUTS_INTERFACE:
+                continue
+            methods.update(getattr(member, "name", "") for member in item.methods)
+            signals.update(getattr(member, "name", "") for member in item.signals)
+        return PortalInterfaceDescription(
+            version=int(version) if version is not None else None,
+            methods=frozenset(item for item in methods if item),
+            signals=frozenset(item for item in signals if item),
+        )
+
+    async def call(self, method: str, *arguments: object) -> object:
+        """Call a portal method and await its standard Request::Response."""
+
+        iface = await self._load_portal_interface()
+        method_name = re.sub(r"(?<!^)(?=[A-Z])", "_", method).lower()
+        caller = getattr(iface, f"call_{method_name}", None)
+        if caller is None:
+            raise PortalClientError(
+                PortalErrorCode.MALFORMED_RESPONSE,
+                f"portal method {method} is not available",
+            )
+        prepared = self._prepare_arguments(method, arguments)
+        request_path = await caller(*prepared)
+        return await self._await_request(request_path)
+
+    def _prepare_arguments(self, method: str, arguments: Sequence[object]) -> tuple[object, ...]:
+        try:
+            from dbus_next import Variant  # type: ignore[import-not-found]
+        except ImportError:
+            return tuple(arguments)
+
+        def variants(value: object) -> dict[str, object]:
+            if not isinstance(value, Mapping):
+                raise TypeError("portal options must be mappings")
+            converted: dict[str, object] = {}
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise TypeError("portal option keys must be strings")
+                if isinstance(item, bool):
+                    converted[key] = Variant("b", item)
+                elif isinstance(item, str):
+                    converted[key] = Variant("s", item)
+                else:
+                    converted[key] = item
+            return converted
+
+        if method == "CreateSession":
+            return (variants(arguments[0]),)
+        if method == "BindShortcuts":
+            session_handle, shortcuts, parent, options = arguments
+            converted_shortcuts = []
+            for shortcut_id, properties in shortcuts:  # type: ignore[misc]
+                converted_shortcuts.append((shortcut_id, variants(properties)))
+            return (
+                session_handle,
+                converted_shortcuts,
+                parent,
+                variants(options),
+            )
+        return tuple(arguments)
+
+    async def _await_request(self, request_path: object) -> Mapping[str, object]:
+        if not isinstance(request_path, str) or not request_path.startswith("/"):
+            raise PortalClientError(
+                PortalErrorCode.MALFORMED_RESPONSE,
+                "portal method returned an invalid request object path",
+            )
+        assert self._bus is not None
+        try:
+            introspection = await self._bus.introspect(PORTAL_BUS_NAME, request_path)
+            proxy = self._bus.get_proxy_object(PORTAL_BUS_NAME, request_path, introspection)
+            request = proxy.get_interface(REQUEST_INTERFACE)
+        except BaseException as exc:
+            failure = map_portal_error(exc)
+            raise PortalClientError(failure.code, failure.reason) from exc
+
+        loop = asyncio.get_running_loop()
+        response_future: asyncio.Future[Mapping[str, object]] = loop.create_future()
+
+        def on_response(response_code: int, results: Mapping[str, object]) -> None:
+            if response_future.done():
+                return
+            if response_code == 0:
+                response_future.set_result(dict(results))
+            elif response_code == 1:
+                response_future.set_exception(
+                    PortalClientError(
+                        PortalErrorCode.CANCELLED,
+                        "the user cancelled the portal request",
+                    )
+                )
+            else:
+                response_future.set_exception(
+                    PortalClientError(
+                        PortalErrorCode.REQUEST_FAILED,
+                        f"portal request returned response code {response_code}",
+                    )
+                )
+
+        request.on_response(on_response)
+        try:
+            return await response_future
+        finally:
+            off_response = getattr(request, "off_response", None)
+            if off_response is not None:
+                off_response(on_response)
+
+    async def subscribe(self, signal: str, callback: SignalCallback) -> Unsubscribe:
+        iface = await self._load_portal_interface()
+        normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", signal).lower()
+        on_signal = getattr(iface, f"on_{normalized}", None)
+        off_signal = getattr(iface, f"off_{normalized}", None)
+        if on_signal is None:
+            raise PortalClientError(
+                PortalErrorCode.MALFORMED_RESPONSE,
+                f"portal signal {signal} is not available",
+            )
+        on_signal(callback)
+
+        def unsubscribe() -> None:
+            if off_signal is not None:
+                off_signal(callback)
+
+        return unsubscribe
+
+
+class UnavailablePortalConnection:
+    """Explicit fake transport for callers that want no live desktop access."""
+
+    async def introspect(
+        self,
+        bus_name: str,
+        object_path: str,
+        interface: str,
+    ) -> PortalInterfaceDescription:
+        raise PortalClientError(
+            PortalErrorCode.SERVICE_UNAVAILABLE,
+            f"no connection is available for {interface}",
+        )
+
+    async def call(self, method: str, *arguments: object) -> object:
+        raise PortalClientError(
+            PortalErrorCode.SERVICE_UNAVAILABLE,
+            f"no connection is available for {GLOBAL_SHORTCUTS_INTERFACE}",
+        )
+
+    async def subscribe(self, signal: str, callback: SignalCallback) -> Unsubscribe:
+        raise PortalClientError(
+            PortalErrorCode.SERVICE_UNAVAILABLE,
+            f"no connection is available for {GLOBAL_SHORTCUTS_INTERFACE}",
+        )
