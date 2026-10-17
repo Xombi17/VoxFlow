@@ -280,3 +280,7 @@ def classify_endpoint(endpoint: str) -> str:
 # Compatibility names retain the Phase 2 Plan 02 imports.
 ProviderConfigSnapshot = ProviderSelectionSnapshot
 ASRJobConfig = ProviderSelectionSnapshot
+
+
+# SQLite settings key holding the catalogue id of the selected local model.
+SELECTED_MODEL_SETTING = "selected_model_id"

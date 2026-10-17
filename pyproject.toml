@@ -30,3 +30,6 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["--import-mode=importlib"]
+
+[tool.setuptools.package-data]
+"voxflow.providers" = ["catalog.json"]
