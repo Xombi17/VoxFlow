@@ -38,8 +38,9 @@ VoxFlow is a Linux-first, local-first voice writing assistant for Ubuntu GNOME o
 | `pydantic` | Pinned release | Typed provider/job/settings contracts | Validate model responses and persisted settings |
 | `pytest` | Pinned dev release | Unit/integration tests | Deterministic cleanup, rules, state transitions, and provider contract fixtures |
 | `ruff` | Pinned dev release | Lint/format | Fast single-command hygiene for Python |
-| `wl-clipboard` | Ubuntu package | Wayland clipboard bridge | Clipboard-first insertion and recovery path |
-| `wtype` or portal EIS/libei | Optional host capability | Synthetic paste/keyboard | Only when explicitly granted and supported; never assume availability |
+| XDG Clipboard portal (RemoteDesktop session) | Host-provided | Clipboard ownership without window focus | Primary insertion path on GNOME (Mutter lacks data-control, so `wl-clipboard` is unreliable there; Handy #1742) |
+| libei via RemoteDesktop `ConnectToEIS` | Host `libei1` | Paste chord (Ctrl+V) injection | Primary on GNOME; `wtype` does NOT work on Mutter, `ydotool` needs root uinput |
+| `sherpa-onnx` | Spike-dependent | Parakeet-TDT ASR provider candidate | Benchmark against faster-whisper in Phase 02.1 |
 ### Development Tools
 | Tool | Purpose | Notes |
 |------|---------|-------|

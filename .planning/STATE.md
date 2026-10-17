@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: ready_to_plan
-stopped_at: Phase 02 complete (3/3) — ready to discuss Phase 03; host acceptance warnings remain
-last_updated: 2026-10-17T06:32:12.508Z
-last_activity: 2026-10-17 - Phase 2 implementation and close-out recorded
+status: verifying
+stopped_at: Audit recorded; Phase 02.1 inserted with context/research — ready to discuss Phase 02.1
+last_updated: "2026-10-17T07:08:14.435Z"
+last_activity: 2026-10-17
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 2
   total_plans: 6
   completed_plans: 6
-  percent: 40
+  percent: 33
 ---
 
 # Project State
@@ -21,13 +21,13 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-10-16)
 
 **Core value:** The user's spoken thought should become useful text in the focused app with as little manual cleanup as possible, without requiring a subscription or a hosted account.
-**Current focus:** Phase 03 — writing pipeline
+**Current focus:** Phase 02.1 — walking skeleton on GNOME 50 (inserted after the 2026-10-17 audit)
 
 ## Current Position
 
-Phase: 03
+Phase: 02.1
 Plan: Not started
-Status: Ready to plan
+Status: Ready to discuss (inserted after audit; Phases 1-2 host-unverified)
 Last activity: 2026-10-17
 
 Progress: [████░░░░░░] 40%
@@ -60,6 +60,10 @@ Progress: [████░░░░░░] 40%
 
 ## Accumulated Context
 
+### Roadmap Evolution
+
+- Phase 02.1 inserted after Phase 2: Walking Skeleton on GNOME 50: audit found no end-to-end dictation loop, missing runtime deps, and a GNOME-50-incompatible paste path (URGENT)
+
 ### Decisions
 
 Decisions are logged in `.planning/PROJECT.md`.
@@ -75,6 +79,12 @@ None yet.
 
 ### Blockers/Concerns
 
+- **2026-10-17 audit (`.planning/research/AUDIT-2026-10-17.md`):** Phases 1–2 are code complete but **host unverified**. No end-to-end dictation has run on the target host.
+- `dbus-next` and `sounddevice` are not in `pyproject.toml` or `.venv`; `gi` is not importable from `.venv`. Live portal and audio paths cannot run (02.1-01).
+- No portal app identity (`.desktop` + `Registry.Register`) (02.1-01).
+- The planned wl-clipboard/wtype insertion does not work on GNOME 50.1 (Handy #1742, #1549). Replaced by RemoteDesktop + Clipboard portal + EIS (02.1-02).
+- Default ASR model unmeasured; medium.en likely too slow on CPU (02.1-03).
+
 - Phase 1 must validate whether the installed portal backend supports reliable hold/release semantics for push-to-talk. Plan 01-02 provides the adapter and records this host's missing `dbus-next` limitation.
 - Phase 1 must validate microphone permission, mute, disconnect, recovery, and negotiated format on Ubuntu GNOME. Plan 01-03 provides the adapter/checklist and records this host's missing `sounddevice` limitation.
 - Phase 1 must validate a safe, usable Wayland insertion path for the user's target applications.
@@ -85,6 +95,7 @@ None yet.
 | # | Description | Date | Commit | Status | Directory |
 |---|-------------|------|--------|--------|-----------|
 | 261016-wlc | Phase 1 session, portal, shortcut, audio, and offline review fixes | 2026-10-16 | bdc9253, e229d48, af6e448, 450e2e9, b0a602e | Verified | [quick task](./quick/261016-wlc-apply-focused-phase-1-code-review-fixes-/) |
+| 261017-hk0 | Record systems audit; insert Phase 02.1; reword INSERT-01; add SKEL/INSERT-03/TEXT-06 | 2026-10-17 | (this commit) | Docs only | [quick task](./quick/261017-hk0-record-systems-audit/) |
 | 261017-034 | Remaining Phase 1 audio teardown and reproducible test-command fixes | 2026-10-17 | bd4f391, 8ec439c, e256a64 | Verified | [quick task](./quick/261017-034-fix-remaining-phase-1-findings/) |
 
 ## Deferred Items
@@ -98,5 +109,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-10-17
-Stopped at: Phase 1 complete (3/3) — ready to discuss Phase 02
+Stopped at: Audit recorded; Phase 02.1 context + research ready — next `/gsd-discuss-phase 02.1` then `/gsd-plan-phase 02.1`
 Resume file: None

@@ -19,7 +19,7 @@ The user's spoken thought should become useful text in the focused app with as l
 - [ ] User can start and stop push-to-talk dictation with a configurable global shortcut on Ubuntu GNOME Wayland.
 - [ ] User receives accurate transcription from a local model, with an optional user-configured cloud provider.
 - [ ] User receives polished text that removes filler, handles obvious self-corrections, adds punctuation, and preserves intended paragraphs and lists.
-- [ ] User can insert the result into the focused application using a Wayland-compatible clipboard/paste path.
+- [ ] User can insert the result into the focused application via the XDG Clipboard + RemoteDesktop/EIS portals (one-time consent).
 - [ ] User can configure language selection, app-aware writing styles, microphone, shortcut behavior, and local/cloud provider preference.
 - [ ] User can manage dictionary words, corrections, snippets, recent transcripts, retryable failures, and privacy controls.
 - [ ] User can run the core dictation flow without an account, paid plan, or vendor-specific licensing service.
@@ -60,6 +60,11 @@ The user's spoken thought should become useful text in the focused app with as l
 | Use local-first hybrid providers | Removes pricing/account barriers while leaving room for better optional quality | Phase 2 implemented; target-host validation pending |
 | Keep platform integration behind adapters | Wayland, XWayland, clipboard, portals, and accessibility have different capabilities | — Pending |
 | Treat REA output as static evidence | The analyzer did not execute Wispr Flow and reported incomplete semantic coverage | — Pending |
+| Walking skeleton before feature layers (Phase 02.1) | 2026-10-17 audit: two phases closed with no end-to-end loop and no host evidence | Adopted 2026-10-17 |
+| GNOME insertion = RemoteDesktop + Clipboard portal + EIS, not wl-copy/wtype/ydotool | Mutter lacks data-control and virtual-keyboard; uinput is root-only; Handy #1742 fails on this exact host | Adopted 2026-10-17; host spike in 02.1-02 |
+| Register host app ID (`dev.voxflow.VoxFlow`) via portal Registry | Portal permissions and restore tokens are keyed by app ID | Adopted 2026-10-17 |
+| Choose the default ASR from an on-host benchmark (small.en, distil-large-v3, Parakeet/sherpa-onnx) | medium.en on CPU is likely > 1 s; the latency target is < 700 ms | Pending 02.1-03 |
+| Gate: a "user can…" criterion cannot close while its host acceptance is unchecked | Prevents fake-only completion | Adopted 2026-10-17 |
 
 ## Evolution
 
@@ -79,4 +84,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current evidence and user feedback.
 
 ---
-*Last updated: 2026-10-17 after Phase 2 close-out*
+*Last updated: 2026-10-17 after systems audit and Phase 02.1 insertion*

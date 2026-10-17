@@ -6,8 +6,9 @@ VoxFlow will be built as a Linux-first vertical slice. The roadmap starts by pro
 
 ## Phases
 
-- [x] **Phase 1: Wayland Foundation** - Prove platform capabilities and establish the testable application skeleton. (completed 2026-10-16)
-- [x] **Phase 2: Local Dictation Engine** - Capture microphone audio and transcribe it locally with optional providers. (completed 2026-10-17; host acceptance pending)
+- [x] **Phase 1: Wayland Foundation** - Prove platform capabilities and establish the testable application skeleton. (code complete 2026-10-16; **host unverified** — see `research/AUDIT-2026-10-17.md`)
+- [x] **Phase 2: Local Dictation Engine** - Capture microphone audio and transcribe it locally with optional providers. (code complete 2026-10-17; **host unverified**, no real benchmark)
+- [ ] **Phase 02.1: Walking Skeleton on GNOME 50** (INSERTED) - Hold, speak, release: raw text lands in the focused app on the target host.
 - [ ] **Phase 3: Writing Pipeline** - Transform speech into polished, personalized text with deterministic rules and provider adapters.
 - [ ] **Phase 4: Insert and Recover** - Paste into supported focused applications and recover from failure without data loss or duplicates.
 - [ ] **Phase 5: Private, Reproducible Desktop App** - Finish settings, privacy controls, packaging, offline tests, and Ubuntu acceptance.
@@ -60,6 +61,29 @@ Plans:
 - [x] 02-02: Add local Whisper provider with model discovery, checksum metadata, VAD/segmentation, and benchmarks.
 - [x] 02-03: Add optional remote provider protocol, provider configuration, and offline/mock contract tests.
 
+### Phase 02.1: Walking Skeleton on GNOME 50 (INSERTED)
+
+**Goal**: On the target Ubuntu 26.04 / GNOME 50.1 host, the user holds the shortcut, speaks, releases, and the raw transcript is pasted into the focused app. This proves the full vertical slice before any further feature layers.
+**Mode:** mvp
+**Depends on**: Phase 2
+**Why inserted**: The 2026-10-17 audit (`.planning/research/AUDIT-2026-10-17.md`) found no end-to-end loop, uninstalled runtime deps (`dbus-next`, `sounddevice`), no portal app identity, and an insertion plan (wl-clipboard/wtype) that fails on GNOME 50 (Handy #1742, #1549).
+**Requirements**: [SKEL-01, SKEL-02, SKEL-03]
+**Success Criteria** (what must be TRUE):
+
+  1. With network disabled, hold-speak-release puts the raw transcript into GNOME Text Editor and a Firefox textarea, 20/20 attempts, with no dropped first character, stale-clipboard paste, or duplicate.
+  2. Release→text p50 < 700 ms for a ~6 s utterance with the default model chosen from a recorded on-host benchmark of at least 3 candidates.
+  3. RemoteDesktop/Clipboard consent is asked once; after logout/login the restore token reuses it without a new dialog.
+  4. A denied or unavailable insertion keeps the text and tells the user how to paste it manually. GNOME Terminal behavior is recorded (Ctrl+Shift+V limitation).
+  5. Phase 1 and Phase 2 host-acceptance checklists are filled for the items this phase exercises.
+
+**Plans**: 3 plans
+
+Plans:
+
+- [ ] 02.1-01: Runtime deps (`dbus-next`, `sounddevice`, `numpy`), `.desktop` app ID, and portal `Registry.Register`; live `--probe-portals` on host.
+- [ ] 02.1-02: Portal insertion spike — RemoteDesktop (keyboard, persist) + Clipboard portal + EIS Ctrl+V with keymap-derived keycodes; fake-backed tests.
+- [ ] 02.1-03: `voxflow daemon` wiring GlobalShortcuts → AudioSession → DictationJobRunner → ASR provider → insert; systemd user unit; on-host ASR benchmark (small.en, distil-large-v3, Parakeet via sherpa-onnx).
+
 ### Phase 3: Writing Pipeline
 
 **Goal**: Raw speech becomes readable text while preserving the original transcript and user control.
@@ -89,7 +113,8 @@ Plans:
 **Requirements**: [INSERT-01, INSERT-02, REC-01, REC-02, REC-03]
 **Success Criteria** (what must be TRUE):
 
-  1. Final text is inserted into at least one supported Wayland text field through the clipboard-first adapter and the capability is reported.
+  1. Final text is inserted through the portal Clipboard + EIS adapter proven in Phase 02.1 (no wl-copy/wtype on GNOME), and the capability is reported.
+  5. Insertion uses one keymap-correct paste chord after trigger release; optional clipboard restore only runs when VoxFlow still owns the selection, and it never pastes stale content (INSERT-03).
   2. Unsupported or denied insertion leaves copy, retry, and save actions with the final text intact.
   3. History records raw/final text, status, provider, transformation settings, timestamps, and recovery metadata.
   4. Cancelling or retrying a job does not paste duplicate text, and temporary audio retention follows the configured policy.
@@ -98,7 +123,7 @@ Plans:
 
 Plans:
 
-- [ ] 04-01: Implement clipboard-first insertion, portal/EIS or supported keyboard fallback, and focused-app capability reporting.
+- [ ] 04-01: Harden portal Clipboard + EIS insertion (configurable paste chord, safe clipboard restore, sensitive-selection hint), optional GNOME Shell extension fallback, and capability reporting.
 - [ ] 04-02: Add durable job history, audio retention, retry/cancel transitions, and idempotent insertion attempts.
 - [ ] 04-03: Build status/history/recovery UI and host acceptance checks for GTK, browser, terminal, and XWayland cases.
 
@@ -127,12 +152,13 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
+Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Wayland Foundation | 3/3 | Complete    | 2026-10-16 |
-| 2. Local Dictation Engine | 3/3 | Complete with warnings | 2026-10-17 |
+| 1. Wayland Foundation | 3/3 | Code complete; host unverified | 2026-10-16 |
+| 2. Local Dictation Engine | 3/3 | Code complete; host unverified | 2026-10-17 |
+| 02.1. Walking Skeleton on GNOME 50 | 0/3 | Context ready | - |
 | 3. Writing Pipeline | 0/3 | Not started | - |
 | 4. Insert and Recover | 0/3 | Not started | - |
 | 5. Private, Reproducible Desktop App | 0/3 | Not started | - |

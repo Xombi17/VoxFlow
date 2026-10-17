@@ -143,3 +143,21 @@
 ---
 *Pitfalls research for: VoxFlow*
 *Researched: 2026-10-16*
+
+## Addendum 2026-10-17 — Lessons from Handy's Linux issue tracker
+
+See `.planning/research/AUDIT-2026-10-17.md` for evidence.
+
+| Pitfall | Handy issue | Prevention | Phase |
+|---|---|---|---|
+| wl-copy/arboard clipboard fails or hangs on GNOME (no data-control) | #1742, #1549 | Clipboard portal within the RemoteDesktop session | 02.1 |
+| wtype offered on GNOME, where it cannot work | #2006 | Capability-detect; never offer it on Mutter | 02.1 |
+| First char dropped / shifted chars lost with per-character typing | #429, #2184 | Single paste chord after trigger release | 02.1 |
+| Hardcoded Ctrl keycode / wrong layout | #2004, #439 | Keycodes from the EIS-supplied XKB keymap | 02.1 |
+| Clipboard restore races the target → stale paste | #502 | Restore only while still owning the selection; optional | 4 |
+| Transcripts land in clipboard history | #2072 | Sensitive-selection hint where supported | 4 |
+| Empty LLM cleanup output drops dictation | #2268 | Raw fallback (TEXT-06) | 3 |
+| "Success" logged when paste went nowhere | #2275 | Report `sent`, keep text in history | 02.1 |
+| Capture stalls after overrun | #2113, #806 | Frame watchdog, PipeWire-backed capture | 02.1 |
+| Leaked PipeWire playback streams | #1973 | One reusable feedback stream or none | 5 |
+| Portal identity missing for unsandboxed apps | #1555 | `.desktop` + `Registry.Register` | 02.1 |

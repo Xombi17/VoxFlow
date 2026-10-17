@@ -10,12 +10,18 @@ Requirements for the first Ubuntu GNOME Wayland release. Each requirement maps t
 ### Platform and Session
 
 - [x] **PLAT-01**: The application reports whether it is running on Wayland, X11, or an unsupported session and lists the available shortcut, clipboard, paste, and audio capabilities.
-- [x] **PLAT-02**: The user can configure and bind a dictation shortcut through a supported Ubuntu GNOME integration without the application requiring an account or paid service.
+- [ ] **PLAT-02**: The user can configure and bind a dictation shortcut through a supported Ubuntu GNOME integration without the application requiring an account or paid service.
 - [x] **PLAT-03**: The user sees a clear idle, listening, processing, success, cancelled, or failed status while a dictation job is active.
+
+### Walking Skeleton (Phase 02.1, added 2026-10-17)
+
+- [ ] **SKEL-01**: On the target GNOME 50 host, the user holds the shortcut, speaks, releases, and the raw transcript is pasted into the focused GNOME Text Editor or Firefox text field, with no network access.
+- [ ] **SKEL-02**: Release→text p50 latency is under 700 ms for a ~6 s utterance using a default local model chosen from a recorded on-host benchmark.
+- [ ] **SKEL-03**: Insertion consent (RemoteDesktop + Clipboard portal) is granted once and persists across sessions via a locally stored restore token, under a registered app ID.
 
 ### Audio and Transcription
 
-- [x] **AUDIO-01**: The user can select a microphone, grant/deny permission, and receive actionable feedback when the device is missing, disconnected, muted, or unavailable.
+- [ ] **AUDIO-01**: The user can select a microphone, grant/deny permission, and receive actionable feedback when the device is missing, disconnected, muted, or unavailable.
 - [ ] **AUDIO-02**: The user can dictate without network access using an installed local speech-to-text model.
 - [ ] **AUDIO-03**: The user can configure an optional LAN or cloud speech provider without changing the core dictation workflow.
 - [ ] **AUDIO-04**: The application records measured cold-start, warm-start, and end-to-end transcription latency for local provider profiles without sending telemetry.
@@ -27,10 +33,12 @@ Requirements for the first Ubuntu GNOME Wayland release. Each requirement maps t
 - [ ] **TEXT-03**: The user can add, edit, remove, and test dictionary words and whole-word correction rules with deterministic precedence.
 - [ ] **TEXT-04**: The user can define spoken snippets that expand to saved text without modifying the immutable raw transcript.
 - [ ] **TEXT-05**: The user can choose deterministic cleanup or an explicitly configured local/LAN/cloud cleanup provider, with the selected policy stored per job.
+- [ ] **TEXT-06**: If a cleanup provider fails, times out, or returns empty output, the raw transcript is inserted instead and the fallback is recorded (Handy #2268).
 
 ### Insertion and Recovery
 
-- [ ] **INSERT-01**: The application inserts final text into a supported focused text field using a Wayland-compatible clipboard-first path.
+- [ ] **INSERT-01**: The application inserts final text into a supported focused text field via the XDG Clipboard portal plus an EIS paste chord within a RemoteDesktop session (GNOME has no data-control or virtual-keyboard protocol for wl-copy/wtype).
+- [ ] **INSERT-03**: Paste injection happens only after trigger release, uses keycodes from the compositor keymap, never types text per character, and any clipboard restore runs only while VoxFlow still owns the selection.
 - [ ] **INSERT-02**: When direct insertion is unavailable, the application preserves the final text and offers copy, retry, or save actions instead of silently discarding it.
 - [ ] **REC-01**: The application stores recent jobs with raw transcript, final text, timestamps, status, provider metadata, and transformation settings.
 - [ ] **REC-02**: The user can cancel an active job and retry a recoverable failed job without creating duplicate insertion.
@@ -90,9 +98,12 @@ Deferred until the v1 dictation loop is reliable.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PLAT-01 | Phase 1 | Complete |
-| PLAT-02 | Phase 1 | Implemented; live portal validation pending |
+| PLAT-02 | Phase 1 | Code complete; host validation in Phase 02.1 |
 | PLAT-03 | Phase 1 | Complete |
-| AUDIO-01 | Phase 1 | Implemented; live host validation pending |
+| AUDIO-01 | Phase 1 | Code complete; host validation in Phase 02.1 |
+| SKEL-01 | Phase 02.1 | Pending |
+| SKEL-02 | Phase 02.1 | Pending |
+| SKEL-03 | Phase 02.1 | Pending |
 | AUDIO-02 | Phase 2 | Pending |
 | AUDIO-03 | Phase 2 | Pending |
 | AUDIO-04 | Phase 2 | Pending |
@@ -101,8 +112,10 @@ Deferred until the v1 dictation loop is reliable.
 | TEXT-03 | Phase 3 | Pending |
 | TEXT-04 | Phase 3 | Pending |
 | TEXT-05 | Phase 3 | Pending |
+| TEXT-06 | Phase 3 | Pending |
 | INSERT-01 | Phase 4 | Pending |
 | INSERT-02 | Phase 4 | Pending |
+| INSERT-03 | Phase 4 | Pending |
 | REC-01 | Phase 4 | Pending |
 | REC-02 | Phase 4 | Pending |
 | REC-03 | Phase 4 | Pending |
@@ -112,10 +125,10 @@ Deferred until the v1 dictation loop is reliable.
 | BUILD-01 | Phase 5 | Pending |
 
 **Coverage:**
-- v1 requirements: 21 total
-- Mapped to phases: 21
+- v1 requirements: 26 total
+- Mapped to phases: 26
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-10-16*
-*Last updated: 2026-10-16 after initial GSD research and scope definition*
+*Last updated: 2026-10-17 after systems audit (SKEL-01..03, TEXT-06, INSERT-03 added; INSERT-01 reworded)*
