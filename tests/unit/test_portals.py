@@ -6,9 +6,12 @@ from voxflow.core.capabilities import CapabilityStatus
 from voxflow.platform.portals import (
     GLOBAL_SHORTCUTS_INTERFACE,
     GlobalShortcutsPortal,
+    APP_ID,
+    DesktopEntryError,
     PortalClientError,
     PortalErrorCode,
     PortalInterfaceDescription,
+    install_desktop_entry,
 )
 from voxflow.platform.session import SessionType, detect_session
 
@@ -248,3 +251,79 @@ def test_malformed_portal_description_is_unsupported() -> None:
     assert result.capability.status is CapabilityStatus.UNSUPPORTED
     assert result.failure is not None
     assert result.failure.code is PortalErrorCode.MALFORMED_RESPONSE
+
+
+class RegistryConnection(FakePortalConnection):
+    def __init__(self, register_error=None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.register_error = register_error
+        self.events = []
+
+    async def introspect(self, bus_name, object_path, interface):
+        self.events.append("introspect")
+        return await super().introspect(bus_name, object_path, interface)
+
+    async def call(self, method, *arguments):
+        self.events.append(method)
+        return {"session_handle": "/s"}
+
+    async def call_interface(self, interface, method, signature, *arguments):
+        self.events.append((interface, method, signature, arguments))
+        if self.register_error:
+            raise self.register_error
+
+
+DESCRIPTION = PortalInterfaceDescription(
+    version=2,
+    methods={"CreateSession", "BindShortcuts"},
+    signals={"Activated", "Deactivated"},
+)
+
+
+def test_register_app_id_runs_once_before_shortcuts_calls() -> None:
+    conn = RegistryConnection(introspection=DESCRIPTION)
+    portal = GlobalShortcutsPortal(conn)
+
+    async def run():
+        await portal.probe()
+        await portal.create_session()
+
+    asyncio.run(run())
+    assert conn.events[0][1:] == ("Register", "sa{sv}", (APP_ID, {}))
+    assert conn.events[1:] == ["introspect", "CreateSession"]
+
+
+def test_register_app_id_failure_is_typed_warning_not_fatal() -> None:
+    conn = RegistryConnection(
+        register_error=PortalClientError(PortalErrorCode.SERVICE_UNAVAILABLE, "no registry"),
+        introspection=DESCRIPTION,
+    )
+    portal = GlobalShortcutsPortal(conn)
+    result = asyncio.run(portal.probe())
+    assert result.supported
+    assert portal.registration_failure.code is PortalErrorCode.SERVICE_UNAVAILABLE
+    assert "app id not registered" in result.capabilities[-1].reason
+    assert sum(1 for e in conn.events if isinstance(e, tuple)) == 1  # not retried
+
+
+def test_install_desktop_entry_copies_and_refuses_symlinks(tmp_path) -> None:
+    src = tmp_path / "src.desktop"
+    src.write_text("[Desktop Entry]\n")
+    dest = install_desktop_entry(src, tmp_path / "ok")
+    assert dest.read_text() == "[Desktop Entry]\n"
+
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / "applications").symlink_to(target)
+    with pytest.raises(DesktopEntryError):
+        install_desktop_entry(src, linked)
+    assert not list(target.iterdir())
+
+    file_link = tmp_path / "fl"
+    (file_link / "applications").mkdir(parents=True)
+    (file_link / "applications" / "dev.voxflow.VoxFlow.desktop").symlink_to(tmp_path / "x")
+    with pytest.raises(DesktopEntryError):
+        install_desktop_entry(src, file_link)
+    assert not (tmp_path / "x").exists()

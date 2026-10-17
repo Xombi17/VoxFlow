@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=VoxFlow
+Comment=Local-first voice writing assistant
+Exec=voxflow daemon
+Icon=audio-input-microphone
+NoDisplay=true
+Categories=Utility;

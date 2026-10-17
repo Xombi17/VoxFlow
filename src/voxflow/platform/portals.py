@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 import re
 import secrets
+import shutil
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -24,6 +27,9 @@ GLOBAL_SHORTCUTS_INTERFACE = "org.freedesktop.portal.GlobalShortcuts"
 REQUEST_INTERFACE = "org.freedesktop.portal.Request"
 SESSION_INTERFACE = "org.freedesktop.portal.Session"
 MIN_GLOBAL_SHORTCUTS_VERSION = 2
+APP_ID = "dev.voxflow.VoxFlow"
+REGISTRY_INTERFACE = "org.freedesktop.host.portal.Registry"
+DESKTOP_ENTRY_NAME = f"{APP_ID}.desktop"
 
 
 class PortalErrorCode(StrEnum):
@@ -102,6 +108,14 @@ class PortalConnection(Protocol):
     ) -> PortalInterfaceDescription | Mapping[str, object]: ...
 
     async def call(self, method: str, *arguments: object) -> object: ...
+
+    async def call_interface(
+        self,
+        interface: str,
+        method: str,
+        signature: str,
+        *arguments: object,
+    ) -> object: ...
 
     async def subscribe(self, signal: str, callback: SignalCallback) -> Unsubscribe: ...
 
@@ -348,10 +362,53 @@ class GlobalShortcutsPortal:
         self.connection = connection or DbusNextPortalConnection()
         self._close_session_boundary = close_session
         self._close_boundary = close
+        self._registered = False
+        self.registration_failure: PortalFailure | None = None
+
+    async def register_app_id(self) -> bool:
+        """Register APP_ID with the portal Registry once per connection.
+
+        Failure is recorded in ``registration_failure`` and is not fatal:
+        older portals lack the Registry interface.
+        """
+
+        if self._registered:
+            return True
+        self._registered = True  # one attempt per connection, even on failure
+        try:
+            await self.connection.call_interface(
+                REGISTRY_INTERFACE, "Register", "sa{sv}", APP_ID, {}
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.registration_failure = map_portal_error(exc, interface=REGISTRY_INTERFACE)
+            return False
+        self.registration_failure = None
+        return True
 
     async def probe(self) -> PortalProbeResult:
         """Introspect GlobalShortcuts without creating a session or binding keys."""
 
+        result = await self._probe_shortcuts()
+        if self.registration_failure is None:
+            return result
+        unregistered = CapabilityRecord(
+            id="portal.app_id",
+            status=CapabilityStatus.NEEDS_USER_ACTION,
+            reason="app id not registered: run `voxflow install-identity` and retry.",
+        )
+        return PortalProbeResult(
+            interface=result.interface,
+            version=result.version,
+            methods=result.methods,
+            signals=result.signals,
+            capabilities=(*result.capabilities, unregistered),
+            failure=result.failure,
+        )
+
+    async def _probe_shortcuts(self) -> PortalProbeResult:
+        await self.register_app_id()
         try:
             raw = await self.connection.introspect(
                 PORTAL_BUS_NAME,
@@ -448,6 +505,7 @@ class GlobalShortcutsPortal:
     async def create_session(self) -> str:
         """Create a portal session and return its object path."""
 
+        await self.register_app_id()
         handle_token = _request_token("request")
         session_handle_token = _request_token("session")
         try:
@@ -570,9 +628,9 @@ class DbusNextPortalConnection:
         self._portal_interface: Any | None = None
         self._portal_proxy: Any | None = None
 
-    async def _load_portal_interface(self) -> Any:
-        if self._portal_interface is not None:
-            return self._portal_interface
+    async def _connect_bus(self) -> Any:
+        if self._bus is not None:
+            return self._bus
         try:
             from dbus_next.aio import MessageBus  # type: ignore[import-not-found]
             from dbus_next.constants import BusType  # type: ignore[import-not-found]
@@ -583,6 +641,58 @@ class DbusNextPortalConnection:
             ) from exc
         try:
             self._bus = await MessageBus(bus_type=BusType.SESSION).connect()
+        except Exception as exc:
+            failure = map_portal_error(exc)
+            raise PortalClientError(failure.code, failure.reason) from exc
+        return self._bus
+
+    async def call_interface(
+        self,
+        interface: str,
+        method: str,
+        signature: str,
+        *arguments: object,
+    ) -> object:
+        """Call a method on the portal object; returns the reply body."""
+
+        from dbus_next import Message, MessageType, Variant  # type: ignore[import-not-found]
+
+        bus = await self._connect_bus()
+        body = [
+            {k: Variant("s", v) if isinstance(v, str) else v for k, v in a.items()}
+            if isinstance(a, Mapping)
+            else a
+            for a in arguments
+        ]
+        try:
+            reply = await bus.call(
+                Message(
+                    destination=PORTAL_BUS_NAME,
+                    path=PORTAL_OBJECT_PATH,
+                    interface=interface,
+                    member=method,
+                    signature=signature,
+                    body=body,
+                )
+            )
+        except Exception as exc:
+            failure = map_portal_error(exc, interface=interface)
+            raise PortalClientError(failure.code, failure.reason) from exc
+        if reply.message_type == MessageType.ERROR:
+            failure = map_portal_error(
+                PortalClientError(
+                    PortalErrorCode.REQUEST_FAILED, f"{reply.error_name} {reply.body}"
+                ),
+                interface=interface,
+            )
+            raise PortalClientError(failure.code, failure.reason)
+        return reply.body
+
+    async def _load_portal_interface(self) -> Any:
+        if self._portal_interface is not None:
+            return self._portal_interface
+        await self._connect_bus()
+        try:
             introspection = await self._bus.introspect(
                 PORTAL_BUS_NAME,
                 PORTAL_OBJECT_PATH,
@@ -825,6 +935,18 @@ class UnavailablePortalConnection:
             f"no connection is available for {GLOBAL_SHORTCUTS_INTERFACE}",
         )
 
+    async def call_interface(
+        self,
+        interface: str,
+        method: str,
+        signature: str,
+        *arguments: object,
+    ) -> object:
+        raise PortalClientError(
+            PortalErrorCode.SERVICE_UNAVAILABLE,
+            f"no connection is available for {interface}",
+        )
+
     async def subscribe(self, signal: str, callback: SignalCallback) -> Unsubscribe:
         raise PortalClientError(
             PortalErrorCode.SERVICE_UNAVAILABLE,
@@ -836,3 +958,31 @@ class UnavailablePortalConnection:
 
     async def close(self) -> None:
         return None
+
+
+class DesktopEntryError(RuntimeError):
+    """Refusal to install the desktop entry (for example, symlink target)."""
+
+
+def install_desktop_entry(
+    source: Path | None = None,
+    data_home: Path | None = None,
+) -> Path:
+    """Copy the .desktop file into ``$XDG_DATA_HOME/applications``.
+
+    Refuses to write through a symlinked applications directory or destination.
+    """
+
+    source = source or Path(__file__).resolve().parents[3] / "packaging" / DESKTOP_ENTRY_NAME
+    if data_home is None:
+        data_home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    apps = data_home / "applications"
+    destination = apps / DESKTOP_ENTRY_NAME
+    for path in (apps, destination):
+        if os.path.islink(path):
+            raise DesktopEntryError(f"refusing to write through symlink: {path}")
+    if not source.is_file():
+        raise DesktopEntryError(f"desktop entry source not found: {source}")
+    apps.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    return destination
