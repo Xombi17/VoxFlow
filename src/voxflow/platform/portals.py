@@ -30,6 +30,10 @@ MIN_GLOBAL_SHORTCUTS_VERSION = 2
 APP_ID = "dev.voxflow.VoxFlow"
 REGISTRY_INTERFACE = "org.freedesktop.host.portal.Registry"
 DESKTOP_ENTRY_NAME = f"{APP_ID}.desktop"
+REMOTE_DESKTOP_INTERFACE = "org.freedesktop.portal.RemoteDesktop"
+CLIPBOARD_INTERFACE = "org.freedesktop.portal.Clipboard"
+DEVICE_KEYBOARD = 1  # T-02.1-05: keyboard only, never pointer/ScreenCast
+PERSIST_UNTIL_REVOKED = 2
 
 
 class PortalErrorCode(StrEnum):
@@ -195,6 +199,9 @@ def map_portal_error(error: BaseException, *, interface: str = GLOBAL_SHORTCUTS_
                 "name has no owner",
                 "not found",
                 "unavailable",
+                "unknownmethod",
+                "unknowninterface",
+                "unknownobject",
                 "dbus-next is not installed",
             )
         ):
@@ -615,6 +622,208 @@ class GlobalShortcutsPortal:
             raise PortalClientError(failure.code, failure.reason) from exc
 
 
+def _error_code(dbus_name: str | None) -> PortalErrorCode:
+    name = (dbus_name or "").lower()
+    if "unknown" in name or "serviceunknown" in name:
+        return PortalErrorCode.SERVICE_UNAVAILABLE
+    if "notallowed" in name or "accessdenied" in name:
+        return PortalErrorCode.PERMISSION_DENIED
+    return PortalErrorCode.REQUEST_FAILED
+
+
+def _variant(value: object) -> object:
+    from dbus_next import Variant  # type: ignore[import-not-found]
+
+    if isinstance(value, bool):
+        return Variant("b", value)
+    if isinstance(value, int):
+        return Variant("u", value)
+    if isinstance(value, str):
+        return Variant("s", value)
+    if isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value):
+        return Variant("as", list(value))
+    return value
+
+
+def _variant_dict(options: Mapping[str, object]) -> dict[str, object]:
+    return {key: _variant(value) for key, value in options.items()}
+
+
+class RemoteDesktopPortal:
+    """One keyboard RemoteDesktop session with Clipboard enabled (D-08)."""
+
+    def __init__(
+        self,
+        connection: Any | None = None,
+        *,
+        token_loader: Callable[[], str | None] | None = None,
+        token_saver: Callable[[str], object] | None = None,
+    ) -> None:
+        from . import restore_token
+
+        self.connection = connection or DbusNextPortalConnection()
+        self._load = token_loader or restore_token.load
+        self._save = token_saver or restore_token.store
+        self.session_handle: str | None = None
+        self._unsubscribes: list[Unsubscribe] = []
+
+    async def _guard(self, interface: str, awaitable: Awaitable[Any]) -> Any:
+        try:
+            return await awaitable
+        except (asyncio.CancelledError, PortalClientError):
+            raise
+        except Exception as exc:
+            failure = map_portal_error(exc, interface=interface)
+            raise PortalClientError(failure.code, failure.reason) from exc
+
+    async def open_session(self) -> str:
+        """CreateSession, SelectDevices, RequestClipboard, Start; persist token."""
+
+        conn = self.connection
+        results = await self._guard(
+            REMOTE_DESKTOP_INTERFACE,
+            conn.call_request(
+                REMOTE_DESKTOP_INTERFACE,
+                "CreateSession",
+                "a{sv}",
+                {
+                    "handle_token": (t := _request_token("request")),
+                    "session_handle_token": _request_token("session"),
+                },
+                token=t,
+            ),
+        )
+        session = _extract_string(results, field="session_handle")
+        self.session_handle = session
+        options: dict[str, object] = {
+            "types": DEVICE_KEYBOARD,
+            "persist_mode": PERSIST_UNTIL_REVOKED,
+        }
+        stored = self._load()
+        if stored:
+            options["restore_token"] = stored
+        await self._guard(
+            REMOTE_DESKTOP_INTERFACE,
+            conn.call_request(
+                REMOTE_DESKTOP_INTERFACE,
+                "SelectDevices",
+                "oa{sv}",
+                session,
+                {**options, "handle_token": (t := _request_token("select"))},
+                token=t,
+            ),
+        )
+        await self._guard(
+            CLIPBOARD_INTERFACE,
+            conn.call_interface(CLIPBOARD_INTERFACE, "RequestClipboard", "oa{sv}", session, {}),
+        )
+        started = await self._guard(
+            REMOTE_DESKTOP_INTERFACE,
+            conn.call_request(
+                REMOTE_DESKTOP_INTERFACE,
+                "Start",
+                "osa{sv}",
+                session,
+                "",
+                {"handle_token": (t := _request_token("start"))},
+                token=t,
+            ),
+        )
+        new_token = started.get("restore_token") if isinstance(started, Mapping) else None
+        if new_token and new_token != stored:
+            self._save(str(new_token))
+        if not (isinstance(started, Mapping) and started.get("clipboard_enabled")):
+            raise PortalClientError(
+                PortalErrorCode.SERVICE_UNAVAILABLE,
+                "RemoteDesktop session started without clipboard access",
+            )
+        return session
+
+    def _session(self) -> str:
+        if self.session_handle is None:
+            raise PortalClientError(
+                PortalErrorCode.REQUEST_FAILED, "RemoteDesktop session is not open"
+            )
+        return self.session_handle
+
+    async def set_selection(self, mime_types: Sequence[str]) -> None:
+        await self._guard(
+            CLIPBOARD_INTERFACE,
+            self.connection.call_interface(
+                CLIPBOARD_INTERFACE,
+                "SetSelection",
+                "oa{sv}",
+                self._session(),
+                {"mime_types": list(mime_types)},
+            ),
+        )
+
+    async def selection_write(self, serial: int) -> int:
+        return await self._guard(
+            CLIPBOARD_INTERFACE,
+            self.connection.call_fd(
+                CLIPBOARD_INTERFACE, "SelectionWrite", "ou", self._session(), serial
+            ),
+        )
+
+    async def selection_write_done(self, serial: int, ok: bool) -> None:
+        await self._guard(
+            CLIPBOARD_INTERFACE,
+            self.connection.call_interface(
+                CLIPBOARD_INTERFACE,
+                "SelectionWriteDone",
+                "oub",
+                self._session(),
+                serial,
+                bool(ok),
+            ),
+        )
+
+    async def connect_to_eis(self) -> int:
+        return await self._guard(
+            REMOTE_DESKTOP_INTERFACE,
+            self.connection.call_fd(
+                REMOTE_DESKTOP_INTERFACE, "ConnectToEIS", "oa{sv}", self._session(), {}
+            ),
+        )
+
+    async def subscribe(self, signal: str, callback: Callable[..., object]) -> None:
+        """SelectionTransfer -> callback(mime, serial); SelectionOwnerChanged -> callback(is_owner)."""
+
+        if signal not in {"SelectionTransfer", "SelectionOwnerChanged"}:
+            raise ValueError(f"unsupported Clipboard signal: {signal}")
+        session = self._session()
+
+        def on_signal(handle: str, *rest: object) -> None:
+            if handle != session:
+                return
+            if signal == "SelectionTransfer":
+                mime, serial = rest
+                callback(mime, int(serial))  # type: ignore[call-overload]
+            else:
+                options = rest[0] if rest else {}
+                owner = _unwrap_dbus_value(options.get("session_is_owner", False))  # type: ignore[attr-defined]
+                callback(bool(owner))
+
+        self._unsubscribes.append(
+            await self._guard(
+                CLIPBOARD_INTERFACE,
+                self.connection.subscribe_signal(CLIPBOARD_INTERFACE, signal, on_signal),
+            )
+        )
+
+    async def close(self) -> None:
+        for off in self._unsubscribes:
+            off()
+        self._unsubscribes.clear()
+        handle, self.session_handle = self.session_handle, None
+        try:
+            if handle:
+                await self.connection.close_session(handle)
+        finally:
+            await self.connection.close()
+
+
 class DbusNextPortalConnection:
     """Optional lazy ``dbus-next`` transport for a live desktop probe.
 
@@ -640,7 +849,7 @@ class DbusNextPortalConnection:
                 "dbus-next is not installed for the live portal transport",
             ) from exc
         try:
-            self._bus = await MessageBus(bus_type=BusType.SESSION).connect()
+            self._bus = await MessageBus(bus_type=BusType.SESSION, negotiate_unix_fd=True).connect()
         except Exception as exc:
             failure = map_portal_error(exc)
             raise PortalClientError(failure.code, failure.reason) from exc
@@ -658,11 +867,22 @@ class DbusNextPortalConnection:
         from dbus_next import Message, MessageType, Variant  # type: ignore[import-not-found]
 
         bus = await self._connect_bus()
+        reply = await self._send(interface, method, signature, arguments)
+        return reply.body
+
+    async def _send(
+        self,
+        interface: str,
+        method: str,
+        signature: str,
+        arguments: Sequence[object],
+        unix_fds: Sequence[int] = (),
+    ) -> Any:
+        from dbus_next import Message, MessageType  # type: ignore[import-not-found]
+
+        bus = await self._connect_bus()
         body = [
-            {k: Variant("s", v) if isinstance(v, str) else v for k, v in a.items()}
-            if isinstance(a, Mapping)
-            else a
-            for a in arguments
+            _variant_dict(a) if isinstance(a, Mapping) else a for a in arguments
         ]
         try:
             reply = await bus.call(
@@ -673,6 +893,7 @@ class DbusNextPortalConnection:
                     member=method,
                     signature=signature,
                     body=body,
+                    unix_fds=list(unix_fds),
                 )
             )
         except Exception as exc:
@@ -681,12 +902,122 @@ class DbusNextPortalConnection:
         if reply.message_type == MessageType.ERROR:
             failure = map_portal_error(
                 PortalClientError(
-                    PortalErrorCode.REQUEST_FAILED, f"{reply.error_name} {reply.body}"
+                    _error_code(reply.error_name), f"{reply.error_name} {reply.body}"
                 ),
                 interface=interface,
             )
             raise PortalClientError(failure.code, failure.reason)
-        return reply.body
+        return reply
+
+    async def call_fd(
+        self, interface: str, method: str, signature: str, *arguments: object
+    ) -> int:
+        """Call a method whose reply is a single unix fd (signature 'h')."""
+
+        reply = await self._send(interface, method, signature, arguments)
+        try:
+            return int(reply.unix_fds[reply.body[0]])
+        except (IndexError, TypeError, ValueError) as exc:
+            raise PortalClientError(
+                PortalErrorCode.MALFORMED_RESPONSE, f"{method} returned no fd"
+            ) from exc
+
+    async def call_request(
+        self,
+        interface: str,
+        method: str,
+        signature: str,
+        *arguments: object,
+        token: str,
+    ) -> Mapping[str, object]:
+        """Call a Request-style method and return its Response results.
+
+        The Response match is installed before the call so a fast portal
+        cannot answer before we listen (handle_token predicts the path).
+        """
+
+        from dbus_next import MessageType  # type: ignore[import-not-found]
+
+        bus = await self._connect_bus()
+        sender = bus.unique_name[1:].replace(".", "_")
+        path = f"{PORTAL_OBJECT_PATH}/request/{sender}/{token}"
+        future: asyncio.Future[Mapping[str, object]] = (
+            asyncio.get_running_loop().create_future()
+        )
+
+        def handler(msg: Any) -> None:
+            if (
+                msg.message_type != MessageType.SIGNAL
+                or msg.path != path
+                or msg.member != "Response"
+                or future.done()
+            ):
+                return
+            code, results = msg.body
+            if code == 0:
+                future.set_result(
+                    {k: _unwrap_dbus_value(v) for k, v in dict(results).items()}
+                )
+            elif code == 1:
+                future.set_exception(
+                    PortalClientError(
+                        PortalErrorCode.CANCELLED, "the user cancelled the portal request"
+                    )
+                )
+            else:
+                future.set_exception(
+                    PortalClientError(
+                        PortalErrorCode.REQUEST_FAILED,
+                        f"portal request returned response code {code}",
+                    )
+                )
+
+        await self._add_match(REQUEST_INTERFACE, path)
+        bus.add_message_handler(handler)
+        try:
+            await self._send(interface, method, signature, arguments)
+            return await future
+        finally:
+            bus.remove_message_handler(handler)
+
+    async def _add_match(self, interface: str, path: str | None = None) -> None:
+        from dbus_next import Message  # type: ignore[import-not-found]
+
+        rule = f"type='signal',interface='{interface}'"
+        if path:
+            rule += f",path='{path}'"
+        bus = await self._connect_bus()
+        await bus.call(
+            Message(
+                destination="org.freedesktop.DBus",
+                path="/org/freedesktop/DBus",
+                interface="org.freedesktop.DBus",
+                member="AddMatch",
+                signature="s",
+                body=[rule],
+            )
+        )
+
+    async def subscribe_signal(
+        self, interface: str, signal: str, callback: SignalCallback
+    ) -> Unsubscribe:
+        """Subscribe to an arbitrary portal signal; callback gets the body."""
+
+        from dbus_next import MessageType  # type: ignore[import-not-found]
+
+        bus = await self._connect_bus()
+
+        def handler(msg: Any) -> None:
+            if (
+                msg.message_type == MessageType.SIGNAL
+                and msg.interface == interface
+                and msg.member == signal
+            ):
+                callback(*msg.body)
+
+        await self._add_match(interface)
+        bus.add_message_handler(handler)
+        return lambda: bus.remove_message_handler(handler)
 
     async def _load_portal_interface(self) -> Any:
         if self._portal_interface is not None:
@@ -952,6 +1283,14 @@ class UnavailablePortalConnection:
             PortalErrorCode.SERVICE_UNAVAILABLE,
             f"no connection is available for {GLOBAL_SHORTCUTS_INTERFACE}",
         )
+
+    async def call_request(self, interface: str, *args: object, **kw: object) -> object:
+        return await self.call_interface(interface, "", "")
+
+    call_fd = call_request
+
+    async def subscribe_signal(self, interface: str, *args: object) -> Unsubscribe:
+        return await self.call_interface(interface, "", "")  # type: ignore[return-value]
 
     async def close_session(self, session_handle: str) -> None:
         return None
