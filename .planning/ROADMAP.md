@@ -76,13 +76,22 @@ Plans:
   4. A denied or unavailable insertion keeps the text and tells the user how to paste it manually. GNOME Terminal behavior is recorded (Ctrl+Shift+V limitation).
   5. Phase 1 and Phase 2 host-acceptance checklists are filled for the items this phase exercises.
 
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
 
-- [ ] 02.1-01: Runtime deps (`dbus-next`, `sounddevice`, `numpy`), `.desktop` app ID, and portal `Registry.Register`; live `--probe-portals` on host.
-- [ ] 02.1-02: Portal insertion spike — RemoteDesktop (keyboard, persist) + Clipboard portal + EIS Ctrl+V with keymap-derived keycodes; fake-backed tests.
-- [ ] 02.1-03: `voxflow daemon` wiring GlobalShortcuts → AudioSession → DictationJobRunner → ASR provider → insert; systemd user unit; on-host ASR benchmark (small.en, distil-large-v3, Parakeet via sherpa-onnx).
+**Wave 1**
+
+- [ ] 02.1-01: Runtime deps (`dbus-next`, `sounddevice`, `numpy`, `sherpa-onnx`), `.desktop` app ID, portal `Registry.Register`, CLI dispatch; live `--probe-portals` on host.
+
+**Wave 2**
+
+- [ ] 02.1-02: Portal insertion — RemoteDesktop (keyboard, persist) + Clipboard portal + EIS Ctrl+V with keymap-derived keycodes; fake-backed tests; host paste check.
+- [ ] 02.1-04: Model catalogue — `catalog.json`, `voxflow models list|download|use|remove` (SHA-256 verified, explicit consent), Parakeet via sherpa-onnx provider.
+
+**Wave 3**
+
+- [ ] 02.1-03: `voxflow daemon` wiring GlobalShortcuts → AudioSession → DictationJobRunner → ASR provider → insert; systemd user unit; on-host catalogue benchmark and default-model selection; host UAT.
 
 ### Phase 3: Writing Pipeline
 
@@ -158,7 +167,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Wayland Foundation | 3/3 | Code complete; host unverified | 2026-10-16 |
 | 2. Local Dictation Engine | 3/3 | Code complete; host unverified | 2026-10-17 |
-| 02.1. Walking Skeleton on GNOME 50 | 0/3 | Context ready | - |
+| 02.1. Walking Skeleton on GNOME 50 | 0/4 | Planned | - |
 | 3. Writing Pipeline | 0/3 | Not started | - |
 | 4. Insert and Recover | 0/3 | Not started | - |
 | 5. Private, Reproducible Desktop App | 0/3 | Not started | - |
