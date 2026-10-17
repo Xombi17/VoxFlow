@@ -87,7 +87,7 @@ Plans:
 **Wave 2**
 
 - [ ] 02.1-02: Portal insertion — RemoteDesktop (keyboard, persist) + Clipboard portal + EIS Ctrl+V with keymap-derived keycodes; fake-backed tests; host paste check.
-- [ ] 02.1-04: Model catalogue — `catalog.json`, `voxflow models list|download|use|remove` (SHA-256 verified, explicit consent), Parakeet via sherpa-onnx provider.
+- [x] 02.1-04: Model catalogue — `catalog.json`, `voxflow models list|download|use|remove` (SHA-256 verified, explicit consent), Parakeet via sherpa-onnx provider.
 
 **Wave 3**
 
@@ -167,7 +167,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Wayland Foundation | 3/3 | Code complete; host unverified | 2026-10-16 |
 | 2. Local Dictation Engine | 3/3 | Code complete; host unverified | 2026-10-17 |
-| 02.1. Walking Skeleton on GNOME 50 | 1/4 | In Progress|  |
+| 02.1. Walking Skeleton on GNOME 50 | 2/4 | In Progress|  |
 | 3. Writing Pipeline | 0/3 | Not started | - |
 | 4. Insert and Recover | 0/3 | Not started | - |
 | 5. Private, Reproducible Desktop App | 0/3 | Not started | - |
