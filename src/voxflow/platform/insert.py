@@ -43,6 +43,14 @@ class _Fail(Exception):
         self.result, self.detail = result, detail
 
 
+def result_for_portal_error(exc: PortalClientError) -> InsertResult:
+    if exc.code in (PortalErrorCode.CANCELLED, PortalErrorCode.PERMISSION_DENIED):
+        return InsertResult.denied
+    if exc.code is PortalErrorCode.SERVICE_UNAVAILABLE:
+        return InsertResult.unavailable
+    return InsertResult.failed
+
+
 def _write_all(fd: int, data: bytes) -> None:
     # ponytail: blocking write; fine for dictation-sized text (< pipe buffer).
     # Move to a thread/non-blocking write if long pastes ever stall the loop.
@@ -107,13 +115,7 @@ class Inserter:
         except _Fail as exc:
             return self._bad(exc.result, text, exc.detail)
         except PortalClientError as exc:
-            if exc.code in (PortalErrorCode.CANCELLED, PortalErrorCode.PERMISSION_DENIED):
-                result = InsertResult.denied
-            elif exc.code is PortalErrorCode.SERVICE_UNAVAILABLE:
-                result = InsertResult.unavailable
-            else:
-                result = InsertResult.failed
-            return self._bad(result, text, exc.code.value)
+            return self._bad(result_for_portal_error(exc), text, exc.code.value)
         except Unavailable as exc:
             return self._bad(InsertResult.unavailable, text, str(exc))
         except EisError as exc:
