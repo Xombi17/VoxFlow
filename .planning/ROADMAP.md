@@ -7,7 +7,7 @@ VoxFlow will be built as a Linux-first vertical slice. The roadmap starts by pro
 ## Phases
 
 - [x] **Phase 1: Wayland Foundation** - Prove platform capabilities and establish the testable application skeleton. (completed 2026-10-16)
-- [ ] **Phase 2: Local Dictation Engine** - Capture microphone audio and transcribe it locally with optional providers.
+- [x] **Phase 2: Local Dictation Engine** - Capture microphone audio and transcribe it locally with optional providers. (completed 2026-10-17; host acceptance pending)
 - [ ] **Phase 3: Writing Pipeline** - Transform speech into polished, personalized text with deterministic rules and provider adapters.
 - [ ] **Phase 4: Insert and Recover** - Paste into supported focused applications and recover from failure without data loss or duplicates.
 - [ ] **Phase 5: Private, Reproducible Desktop App** - Finish settings, privacy controls, packaging, offline tests, and Ubuntu acceptance.
@@ -56,9 +56,9 @@ Plans:
 
 Plans:
 
-- [ ] 02-01: Add PipeWire-compatible audio session, bounded buffers, WAV/fixture support, and cancellation.
-- [ ] 02-02: Add local Whisper provider with model discovery, checksum metadata, VAD/segmentation, and benchmarks.
-- [ ] 02-03: Add optional remote provider protocol, provider configuration, and offline/mock contract tests.
+- [x] 02-01: Add PipeWire-compatible audio session, bounded buffers, WAV/fixture support, and cancellation.
+- [x] 02-02: Add local Whisper provider with model discovery, checksum metadata, VAD/segmentation, and benchmarks.
+- [x] 02-03: Add optional remote provider protocol, provider configuration, and offline/mock contract tests.
 
 ### Phase 3: Writing Pipeline
 
@@ -132,7 +132,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Wayland Foundation | 3/3 | Complete    | 2026-10-16 |
-| 2. Local Dictation Engine | 0/3 | Not started | - |
+| 2. Local Dictation Engine | 3/3 | Complete with warnings | 2026-10-17 |
 | 3. Writing Pipeline | 0/3 | Not started | - |
 | 4. Insert and Recover | 0/3 | Not started | - |
 | 5. Private, Reproducible Desktop App | 0/3 | Not started | - |

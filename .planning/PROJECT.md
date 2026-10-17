@@ -57,7 +57,7 @@ The user's spoken thought should become useful text in the focused app with as l
 | Build an original alternative rather than an exact code replica | Preserves a useful compatibility target without copying proprietary implementation | — Pending |
 | Target Ubuntu GNOME Wayland first | Matches the user's laptop and exposes the hardest integration constraints early | — Pending |
 | Ship dictation core before Notetaker | Dictation solves the immediate Linux gap and keeps v1 coherent | — Pending |
-| Use local-first hybrid providers | Removes pricing/account barriers while leaving room for better optional quality | — Pending |
+| Use local-first hybrid providers | Removes pricing/account barriers while leaving room for better optional quality | Phase 2 implemented; target-host validation pending |
 | Keep platform integration behind adapters | Wayland, XWayland, clipboard, portals, and accessibility have different capabilities | — Pending |
 | Treat REA output as static evidence | The analyzer did not execute Wispr Flow and reported incomplete semantic coverage | — Pending |
 
@@ -79,4 +79,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current evidence and user feedback.
 
 ---
-*Last updated: 2026-10-16 after initial GSD project initialization*
+*Last updated: 2026-10-17 after Phase 2 close-out*
