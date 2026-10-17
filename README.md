@@ -17,9 +17,22 @@ uv venv --python 3.12
 uv sync --dev
 ```
 
-The Phase 1 package has no required runtime dependencies. `dbus-next` and
-`sounddevice` are optional host transports and are intentionally not required
-by the offline suite. `uv sync --dev` installs the pinned pytest test tool.
+Runtime dependencies (`dbus-next`, `sounddevice`, `numpy`, `sherpa-onnx`) are
+exact-pinned in `pyproject.toml` and `uv.lock`. The offline suite uses fakes and
+never needs a desktop session or model download.
+
+## Host setup
+
+```bash
+uv sync --dev
+sudo apt install libportaudio2 libei1
+```
+
+- `libportaudio2` is the system library required by `sounddevice`.
+- `libei1` is required for EIS (libei) keyboard injection.
+- If a GTK fallback window is ever needed, create the venv with
+  `uv venv --python 3.12 --system-site-packages` to use the distro PyGObject.
+  No GTK dependency is added now.
 
 ## Test and checks
 
