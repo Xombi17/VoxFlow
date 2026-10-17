@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import json
+import sys
 from collections.abc import Iterable
 from typing import Sequence
 
@@ -78,9 +80,34 @@ def recommended_next_action(
     return "Bind the dictation shortcut in the desktop portal, then run the smoke test."
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Print a machine-readable diagnostic and exit successfully."""
+# Fixed allowlist: subcommand -> (module, callable). Never built from argv.
+SUBCOMMANDS = {
+    "daemon": ("voxflow.daemon", "main"),
+    "insert-test": ("voxflow.platform.insert_cli", "main"),
+    "models": ("voxflow.providers.catalog_cli", "main"),
+    "install-identity": ("voxflow.platform.portals", "install_identity_main"),
+}
 
+
+def _dispatch(name: str, rest: list[str]) -> int:
+    module_name, attr = SUBCOMMANDS[name]
+    try:
+        module = importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name != module_name:
+            raise
+        print(f"voxflow {name}: not installed yet ({module_name})")
+        return 2
+    return int(getattr(module, attr)(rest) or 0)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Dispatch a subcommand, or print a machine-readable diagnostic."""
+
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] in SUBCOMMANDS:
+        return _dispatch(args[0], args[1:])
+    argv = args
     parser = argparse.ArgumentParser(prog=APP_NAME)
     parser.add_argument(
         "--json",

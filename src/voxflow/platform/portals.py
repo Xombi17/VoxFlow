@@ -986,3 +986,14 @@ def install_desktop_entry(
     apps.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
     return destination
+
+
+def install_identity_main(argv: Sequence[str] = ()) -> int:
+    """CLI wrapper for ``voxflow install-identity``."""
+
+    try:
+        print(install_desktop_entry())
+    except DesktopEntryError as exc:
+        print(f"install-identity: {exc}")
+        return 1
+    return 0
