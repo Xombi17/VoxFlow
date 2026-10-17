@@ -327,3 +327,13 @@ def test_install_desktop_entry_copies_and_refuses_symlinks(tmp_path) -> None:
     with pytest.raises(DesktopEntryError):
         install_desktop_entry(src, file_link)
     assert not (tmp_path / "x").exists()
+
+
+def test_install_desktop_entry_pins_absolute_exec(tmp_path) -> None:
+    # GLib drops entries whose Exec program is unresolvable; portal then says "App info not found".
+    src = tmp_path / "src.desktop"
+    src.write_text("[Desktop Entry]\nExec=voxflow daemon\nName=X\n")
+    text = install_desktop_entry(src, tmp_path / "ok").read_text()
+    exec_line = next(line for line in text.splitlines() if line.startswith("Exec="))
+    assert exec_line.split()[0].startswith("Exec=/")
+    assert "Name=X" in text

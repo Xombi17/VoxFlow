@@ -12,12 +12,15 @@ import inspect
 import os
 import re
 import secrets
+import shlex
 import shutil
+import sys
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from enum import StrEnum
 from typing import Any, Protocol
+from xml.etree import ElementTree
 
 from ..core.capabilities import CapabilityRecord, CapabilityStatus
 
@@ -1019,15 +1022,37 @@ class DbusNextPortalConnection:
         bus.add_message_handler(handler)
         return lambda: bus.remove_message_handler(handler)
 
+    async def _introspect_interface(self, interface: str) -> Any:
+        """Introspect only ``interface``.
+
+        dbus-next rejects the whole portal object when any sibling interface has
+        an invalid member name (PowerProfileMonitor's ``power-saver-enabled``),
+        so keep just the one interface we need before parsing.
+        """
+
+        from dbus_next import Message  # type: ignore[import-not-found]
+        from dbus_next.introspection import Node  # type: ignore[import-not-found]
+
+        reply = await self._bus.call(
+            Message(
+                destination=PORTAL_BUS_NAME,
+                path=PORTAL_OBJECT_PATH,
+                interface="org.freedesktop.DBus.Introspectable",
+                member="Introspect",
+            )
+        )
+        root = ElementTree.fromstring(reply.body[0])
+        for child in list(root):
+            if child.tag != "interface" or child.get("name") != interface:
+                root.remove(child)
+        return Node.parse(ElementTree.tostring(root, encoding="unicode"))
+
     async def _load_portal_interface(self) -> Any:
         if self._portal_interface is not None:
             return self._portal_interface
         await self._connect_bus()
         try:
-            introspection = await self._bus.introspect(
-                PORTAL_BUS_NAME,
-                PORTAL_OBJECT_PATH,
-            )
+            introspection = await self._introspect_interface(GLOBAL_SHORTCUTS_INTERFACE)
             self._portal_proxy = self._bus.get_proxy_object(
                 PORTAL_BUS_NAME,
                 PORTAL_OBJECT_PATH,
@@ -1323,7 +1348,11 @@ def install_desktop_entry(
     if not source.is_file():
         raise DesktopEntryError(f"desktop entry source not found: {source}")
     apps.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
+    # GLib refuses a desktop entry whose Exec program is not resolvable, and the
+    # portal then reports "App info not found"; pin the running interpreter.
+    exec_line = f"Exec={shlex.quote(sys.executable)} -m voxflow daemon"
+    text = re.sub(r"(?m)^Exec=.*$", lambda _: exec_line, source.read_text())
+    destination.write_text(text)
     return destination
 
 
