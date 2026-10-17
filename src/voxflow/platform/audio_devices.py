@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -92,8 +92,13 @@ class AudioDeviceSelection:
         )
 
 
+AudioFrameCallback = Callable[[bytes, int], object]
+
+
 class AudioStream(Protocol):
     """Async lifecycle boundary for a backend-owned capture stream."""
+
+    def register_frame_callback(self, callback: AudioFrameCallback) -> None: ...
 
     async def start(self) -> None: ...
 

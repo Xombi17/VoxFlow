@@ -1,0 +1,19 @@
+{
+  "fixtures": [
+    {
+      "id": "short-utterance-generated-001",
+      "label": "short deterministic PCM utterance fixture",
+      "file": "short_utterance.wav",
+      "source": "Generated deterministic PCM16 test data by the VoxFlow project",
+      "license": "CC0-equivalent generated test data",
+      "non_personal": true,
+      "permitted_for_repository_tests": true,
+      "sha256": "4dcd827fa00ad38a00930c3d6468c91f7d071a5debcdf4923a08d496a16fbefa",
+      "format": {
+        "sample_rate": 48000,
+        "channels": 1,
+        "encoding": "PCM_S16LE"
+      }
+    }
+  ]
+}

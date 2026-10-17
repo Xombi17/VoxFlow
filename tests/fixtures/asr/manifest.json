@@ -1,0 +1,62 @@
+{
+  "manifest_version": 1,
+  "description": "Stable non-personal ASR evaluation references; model weights stay outside Git.",
+  "fixtures": [
+    {
+      "id": "clean-short-001",
+      "category": "clean",
+      "audio_fixture": "../audio/short_utterance.wav",
+      "sha256": "4dcd827fa00ad38a00930c3d6468c91f7d071a5debcdf4923a08d496a16fbefa",
+      "language_hint": "en",
+      "non_personal": true
+    },
+    {
+      "id": "restart-self-correction-001",
+      "category": "restarts_self_corrections",
+      "audio_fixture": "../audio/short_utterance.wav",
+      "sha256": "4dcd827fa00ad38a00930c3d6468c91f7d071a5debcdf4923a08d496a16fbefa",
+      "language_hint": "en",
+      "non_personal": true
+    },
+    {
+      "id": "names-numbers-technical-001",
+      "category": "names_numbers_technical_terms",
+      "audio_fixture": "../audio/short_utterance.wav",
+      "sha256": "4dcd827fa00ad38a00930c3d6468c91f7d071a5debcdf4923a08d496a16fbefa",
+      "language_hint": "en",
+      "non_personal": true
+    },
+    {
+      "id": "noisy-boundary-001",
+      "category": "noisy_silent_boundary",
+      "audio_fixture": "../audio/short_utterance.wav",
+      "sha256": "4dcd827fa00ad38a00930c3d6468c91f7d071a5debcdf4923a08d496a16fbefa",
+      "language_hint": null,
+      "non_personal": true
+    },
+    {
+      "id": "language-hint-001",
+      "category": "language_hints",
+      "audio_fixture": "../audio/short_utterance.wav",
+      "sha256": "4dcd827fa00ad38a00930c3d6468c91f7d071a5debcdf4923a08d496a16fbefa",
+      "language_hint": "en",
+      "non_personal": true
+    },
+    {
+      "id": "cancellation-001",
+      "category": "cancellation",
+      "audio_fixture": null,
+      "sha256": null,
+      "language_hint": "en",
+      "non_personal": true
+    },
+    {
+      "id": "provider-failure-001",
+      "category": "provider_failure",
+      "audio_fixture": null,
+      "sha256": null,
+      "language_hint": "en",
+      "non_personal": true
+    }
+  ]
+}

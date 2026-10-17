@@ -1,9 +1,11 @@
 import asyncio
+import json
 
 import pytest
 
 from voxflow.core.capabilities import CapabilityStatus
 from voxflow.core.events import AudioEventType
+from voxflow.core.events import AudioEvent
 from voxflow.platform.audio import (
     AudioBackendError,
     AudioCapture,
@@ -40,6 +42,14 @@ class FakeStream:
         self.calls = []
         self.active = False
         self.closed = False
+        self.frame_callback = None
+
+    def register_frame_callback(self, callback):
+        self.frame_callback = callback
+
+    def emit(self, data, frame_count):
+        assert self.frame_callback is not None
+        self.frame_callback(bytes(data), frame_count)
 
     async def start(self):
         self.calls.append("start")
@@ -418,6 +428,9 @@ def test_start_cleanup_failure_retains_handle_for_retry() -> None:
 
 
 class FakeSoundDeviceStream:
+    def __init__(self, callback=None):
+        self.callback = callback
+
     def start(self):
         return None
 
@@ -446,7 +459,7 @@ class FakeSoundDeviceModule:
 
     def InputStream(self, **arguments):
         self.input_stream_arguments.append(arguments)
-        return FakeSoundDeviceStream()
+        return FakeSoundDeviceStream(arguments["callback"])
 
 
 def test_sounddevice_backend_uses_max_input_channels_and_requested_format() -> None:
@@ -469,3 +482,46 @@ def test_sounddevice_backend_uses_max_input_channels_and_requested_format() -> N
         1,
     ]
     assert all("callback" in arguments for arguments in sounddevice.input_stream_arguments)
+
+
+def test_frame_callback_handoff_copies_backend_memory_and_keeps_format() -> None:
+    async def scenario():
+        sounddevice = FakeSoundDeviceModule()
+        backend = SoundDeviceBackend()
+        backend._sounddevice = sounddevice
+        opened = await backend.open("0", FORMAT)
+        received = []
+        opened.stream.register_frame_callback(
+            lambda data, frame_count: received.append((data, frame_count))
+        )
+        source = bytearray(b"\x01\x00\x02\x00")
+        sounddevice.input_stream_arguments[-1]["callback"](source, 2, None, None)
+        source[:] = b"\x09\x09\x09\x09"
+        second_source = bytearray(b"\x03\x00\x04\x00")
+        sounddevice.input_stream_arguments[-1]["callback"](second_source, 2, None, None)
+        second_source[:] = b"\x08\x08\x08\x08"
+        return opened, received
+
+    opened, received = asyncio.run(scenario())
+
+    assert opened.format == FORMAT
+    assert received == [
+        (b"\x01\x00\x02\x00", 2),
+        (b"\x03\x00\x04\x00", 2),
+    ]
+
+
+def test_audio_event_serialization_redacts_absolute_device_paths() -> None:
+    serialized = json.dumps(
+        AudioEvent(
+            type=AudioEventType.CAPTURE_FAILED,
+            sequence=1,
+            device_id="/home/example/private-microphone",
+            error_code="backend_unavailable",
+            error_reason="safe reason",
+        ).to_dict()
+    )
+
+    assert "/home/" not in serialized
+    assert "private-microphone" not in serialized
+    assert "samples" not in serialized

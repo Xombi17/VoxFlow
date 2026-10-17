@@ -14,6 +14,7 @@ from .audio_devices import (
     AudioBackend,
     AudioDevice,
     AudioDeviceSelection,
+    AudioFrameCallback,
     AudioFormat,
     AudioStream,
     OpenedAudioStream,
@@ -676,16 +677,14 @@ class SoundDeviceBackend:
                 "requested format is outside the host probe contract",
             )
 
-        def discard_frames(*args: object) -> None:
-            del args
-
+        stream_adapter = _SoundDeviceStream()
         try:
             stream = sounddevice.InputStream(
                 device=int(device.id),
                 samplerate=negotiated.sample_rate,
                 channels=negotiated.channels,
-                dtype="float32",
-                callback=discard_frames,
+                dtype="int16",
+                callback=stream_adapter.backend_callback,
             )
         except Exception as exc:
             failure = map_audio_error(exc)
@@ -693,26 +692,61 @@ class SoundDeviceBackend:
                 failure.code,
                 "sounddevice could not open the selected input device",
             ) from exc
+        stream_adapter.attach(stream)
         return OpenedAudioStream(
             device=device,
             format=negotiated,
-            stream=_SoundDeviceStream(stream),
+            stream=stream_adapter,
         )
 
 
 class _SoundDeviceStream:
     """Async facade for sounddevice's synchronous stream lifecycle."""
 
-    def __init__(self, stream: Any) -> None:
+    def __init__(self, stream: Any | None = None) -> None:
+        self._stream = stream
+        self._frame_callback: AudioFrameCallback | None = None
+
+    def attach(self, stream: Any) -> None:
         self._stream = stream
 
+    def register_frame_callback(self, callback: AudioFrameCallback) -> None:
+        """Register the only callback that receives copied PCM16 chunks."""
+
+        self._frame_callback = callback
+
+    set_frame_callback = register_frame_callback
+
+    def backend_callback(
+        self,
+        input_data: Any,
+        frame_count: int,
+        _time_info: object,
+        _status: object,
+    ) -> None:
+        """Copy backend-owned callback memory before handing it to the session."""
+
+        callback = self._frame_callback
+        if callback is None:
+            return
+        callback(bytes(input_data), int(frame_count))
+
     async def start(self) -> None:
+        if self._stream is None:
+            raise AudioBackendError(
+                AudioErrorCode.BACKEND_UNAVAILABLE,
+                "sounddevice stream was not attached",
+            )
         await asyncio.to_thread(self._stream.start)
 
     async def stop(self) -> None:
+        if self._stream is None:
+            return
         await asyncio.to_thread(self._stream.stop)
 
     async def close(self) -> None:
+        if self._stream is None:
+            return
         await asyncio.to_thread(self._stream.close)
 
 

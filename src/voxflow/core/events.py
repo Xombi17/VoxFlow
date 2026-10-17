@@ -45,7 +45,11 @@ class AudioEvent:
         return {
             "type": self.type.value,
             "sequence": self.sequence,
-            "device_id": self.device_id,
+            "device_id": (
+                "<redacted-device-id>"
+                if self.device_id is not None and self.device_id.startswith("/")
+                else self.device_id
+            ),
             "sample_rate": self.sample_rate,
             "channels": self.channels,
             "error_code": self.error_code,

@@ -1,0 +1,29 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments and build output
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Local runtime data, model weights, and diagnostics
+models/
+artifacts/
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
