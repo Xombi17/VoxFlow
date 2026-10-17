@@ -82,7 +82,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 02.1-01: Runtime deps (`dbus-next`, `sounddevice`, `numpy`, `sherpa-onnx`), `.desktop` app ID, portal `Registry.Register`, CLI dispatch; live `--probe-portals` on host.
+- [x] 02.1-01: Runtime deps (`dbus-next`, `sounddevice`, `numpy`, `sherpa-onnx`), `.desktop` app ID, portal `Registry.Register`, CLI dispatch; live `--probe-portals` on host.
 
 **Wave 2**
 
@@ -167,7 +167,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Wayland Foundation | 3/3 | Code complete; host unverified | 2026-10-16 |
 | 2. Local Dictation Engine | 3/3 | Code complete; host unverified | 2026-10-17 |
-| 02.1. Walking Skeleton on GNOME 50 | 0/4 | Planned | - |
+| 02.1. Walking Skeleton on GNOME 50 | 1/4 | In Progress|  |
 | 3. Writing Pipeline | 0/3 | Not started | - |
 | 4. Insert and Recover | 0/3 | Not started | - |
 | 5. Private, Reproducible Desktop App | 0/3 | Not started | - |
