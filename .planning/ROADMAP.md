@@ -8,10 +8,10 @@ VoxFlow will be built as a Linux-first vertical slice. The roadmap starts by pro
 
 - [x] **Phase 1: Wayland Foundation** - Prove platform capabilities and establish the testable application skeleton. (code complete 2026-10-16; **host unverified** — see `research/AUDIT-2026-10-17.md`)
 - [x] **Phase 2: Local Dictation Engine** - Capture microphone audio and transcribe it locally with optional providers. (code complete 2026-10-17; **host unverified**, no real benchmark)
-- [ ] **Phase 02.1: Walking Skeleton on GNOME 50** (INSERTED) - Hold, speak, release: raw text lands in the focused app on the target host.
-- [ ] **Phase 3: Writing Pipeline** - Transform speech into polished, personalized text with deterministic rules and provider adapters.
-- [ ] **Phase 4: Insert and Recover** - Paste into supported focused applications and recover from failure without data loss or duplicates.
-- [ ] **Phase 5: Private, Reproducible Desktop App** - Finish settings, privacy controls, packaging, offline tests, and Ubuntu acceptance.
+- [ ] **Phase 02.1: Walking Skeleton on GNOME 50** (INSERTED) - Hold, speak, release: raw text lands in the focused app on the target host. (implementation complete; host acceptance pending)
+- [x] **Phase 3: Writing Pipeline** - Transform speech into polished, personalized text with deterministic rules and provider adapters. (offline code complete 2026-10-18; host acceptance remains Phase 02.1 work)
+- [ ] **Phase 4: Insert and Recover** - Paste into supported focused applications and recover from failure without data loss or duplicates. (automatic implementation complete; GNOME host acceptance pending)
+- [ ] **Phase 5: Private, Reproducible Desktop App** - Finish settings, privacy controls, packaging, offline tests, and Ubuntu acceptance. (automatic implementation complete; host acceptance and Docker daemon verification pending)
 
 ## Phase Details
 
@@ -86,19 +86,19 @@ Plans:
 
 **Wave 2**
 
-- [ ] 02.1-02: Portal insertion — RemoteDesktop (keyboard, persist) + Clipboard portal + EIS Ctrl+V with keymap-derived keycodes; fake-backed tests; host paste check.
+- [x] 02.1-02: Portal insertion — RemoteDesktop (keyboard, persist) + Clipboard portal + EIS Ctrl+V with keymap-derived keycodes; fake-backed tests; host paste check pending.
 - [x] 02.1-04: Model catalogue — `catalog.json`, `voxflow models list|download|use|remove` (SHA-256 verified, explicit consent), Parakeet via sherpa-onnx provider.
 
 **Wave 3**
 
-- [ ] 02.1-03: `voxflow daemon` wiring GlobalShortcuts → AudioSession → DictationJobRunner → ASR provider → insert; systemd user unit; on-host catalogue benchmark and default-model selection; host UAT.
+- [x] 02.1-03: `voxflow daemon` wiring GlobalShortcuts → AudioSession → DictationJobRunner → ASR provider → insert; systemd user unit; on-host catalogue benchmark and default-model selection; host UAT remains pending.
 
 ### Phase 3: Writing Pipeline
 
 **Goal**: Raw speech becomes readable text while preserving the original transcript and user control.
 **Mode:** mvp
-**Depends on**: Phase 2
-**Requirements**: [TEXT-01, TEXT-02, TEXT-03, TEXT-04, TEXT-05]
+**Depends on**: Phase 02.1
+**Requirements**: [TEXT-01, TEXT-02, TEXT-03, TEXT-04, TEXT-05, TEXT-06]
 **Success Criteria** (what must be TRUE):
 
   1. Golden fixtures demonstrate punctuation, paragraph/list formatting, filler cleanup, and obvious self-correction handling.
@@ -110,16 +110,16 @@ Plans:
 
 Plans:
 
-- [ ] 03-01: Build immutable raw/final text contracts and deterministic normalization/formatting pipeline.
-- [ ] 03-02: Add SQLite-backed dictionary, corrections, snippets, language settings, and style profiles.
-- [ ] 03-03: Add deterministic cleanup and optional local/LAN/cloud cleanup provider interface with fixture tests.
+- [x] 03-01: Build immutable raw/final text contracts and deterministic normalization/formatting pipeline. (completed 2026-10-18)
+- [x] 03-02: Add SQLite-backed dictionary, corrections, snippets, language settings, and style profiles.
+- [x] 03-03: Add deterministic cleanup and optional local/LAN/cloud cleanup provider interface with fixture tests.
 
 ### Phase 4: Insert and Recover
 
 **Goal**: A completed dictation reliably reaches the focused app or remains recoverable with no duplicate paste.
 **Mode:** mvp
 **Depends on**: Phase 3
-**Requirements**: [INSERT-01, INSERT-02, REC-01, REC-02, REC-03]
+**Requirements**: [INSERT-01, INSERT-02, INSERT-03, REC-01, REC-02, REC-03]
 **Success Criteria** (what must be TRUE):
 
   1. Final text is inserted through the portal Clipboard + EIS adapter proven in Phase 02.1 (no wl-copy/wtype on GNOME), and the capability is reported.
@@ -132,9 +132,9 @@ Plans:
 
 Plans:
 
-- [ ] 04-01: Harden portal Clipboard + EIS insertion (configurable paste chord, safe clipboard restore, sensitive-selection hint), optional GNOME Shell extension fallback, and capability reporting.
-- [ ] 04-02: Add durable job history, audio retention, retry/cancel transitions, and idempotent insertion attempts.
-- [ ] 04-03: Build status/history/recovery UI and host acceptance checks for GTK, browser, terminal, and XWayland cases.
+- [x] 04-01: Harden portal Clipboard + EIS insertion (configurable paste chord, safe clipboard restore, sensitive-selection hint), optional GNOME Shell extension fallback, and capability reporting.
+- [x] 04-02: Add durable job history, audio retention, retry/cancel transitions, and idempotent insertion attempts.
+- [x] 04-03: Expose recovery actions through the CLI/API; host acceptance checks for Text Editor, browser, terminal, and XWayland cases remain pending.
 
 ### Phase 5: Private, Reproducible Desktop App
 
@@ -154,9 +154,9 @@ Plans:
 
 Plans:
 
-- [ ] 05-01: Finish settings, privacy/retention policy, redacted diagnostics, and configuration migrations.
-- [ ] 05-02: Add packaging, `.python-version`, lockfile, Dockerfile, Makefile, README setup/run/test/deploy instructions.
-- [ ] 05-03: Run full acceptance/regression review, update evidence and handoff docs, and prepare the first milestone release.
+- [x] 05-01: Finish settings, privacy/retention policy, redacted diagnostics, and configuration migrations. (automatic implementation complete; live GTK/host checks pending)
+- [x] 05-02: Add packaging, `.python-version`, lockfile, Dockerfile, Makefile, README setup/run/test/deploy instructions. (Docker daemon verification pending)
+- [x] 05-03: Run full offline regression review, update evidence and handoff docs, and prepare the first milestone release. (GNOME host acceptance pending)
 
 ## Progress
 
@@ -167,10 +167,10 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Wayland Foundation | 3/3 | Code complete; host unverified | 2026-10-16 |
 | 2. Local Dictation Engine | 3/3 | Code complete; host unverified | 2026-10-17 |
-| 02.1. Walking Skeleton on GNOME 50 | 2/4 | In Progress|  |
-| 3. Writing Pipeline | 0/3 | Not started | - |
-| 4. Insert and Recover | 0/3 | Not started | - |
-| 5. Private, Reproducible Desktop App | 0/3 | Not started | - |
+| 02.1. Walking Skeleton on GNOME 50 | 4/4 | Implementation complete; host acceptance pending |  |
+| 3. Writing Pipeline | 3/3 | Offline code complete; host acceptance remains Phase 02.1 work | 2026-10-18 |
+| 4. Insert and Recover | 3/3 | Automatic implementation complete; host acceptance pending | 2026-10-19 |
+| 5. Private, Reproducible Desktop App | 3/3 | Automatic implementation complete; host acceptance/Docker pending | 2026-10-19 |
 
 ---
 *Roadmap created: 2026-10-16*

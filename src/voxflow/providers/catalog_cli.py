@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     ls = sub.add_parser("list")
     ls.add_argument("--json", action="store_true")
     dl = sub.add_parser("download")
-    dl.add_argument("id")
+    dl.add_argument("id", nargs="+", help="one or more catalog model IDs")
     dl.add_argument("--yes", action="store_true", help="confirm network use")
     for name in ("use", "remove"):
         sub.add_parser(name).add_argument("id")
@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
                     p50 = f"p50 {r['p50_ms']:.0f} ms" if isinstance(r["p50_ms"], (int, float)) else "p50 -"
                     print(f"{r['id']:<24} {r['tier']:<8} {r['size_bytes'] / 1e6:>7.0f} MB  {flag:<14} {p50}")
         elif args.cmd == "download":
-            entry = catalog.get_entry(args.id)
+            entries = tuple(catalog.get_entry(model_id) for model_id in args.id)
 
             def confirm(notice: str) -> bool:
                 print(notice)
@@ -45,8 +45,9 @@ def main(argv: list[str] | None = None) -> int:
                     return False
                 return input("Proceed? [y/N] ").strip().lower() in ("y", "yes")
 
-            catalog.download_model(entry, root, confirm=confirm)
-            print(f"Installed {entry.id}")
+            for entry in entries:
+                catalog.download_model(entry, root, confirm=confirm)
+                print(f"Installed {entry.id}")
         elif args.cmd == "use":
             catalog.select(args.id, root, db_path=args.db)
             print(f"Selected {args.id}. Restart or reload the VoxFlow daemon to apply.")

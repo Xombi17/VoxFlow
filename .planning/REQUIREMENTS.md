@@ -28,12 +28,12 @@ Requirements for the first Ubuntu GNOME Wayland release. Each requirement maps t
 
 ### Text Transformation and Personalization
 
-- [ ] **TEXT-01**: The application transforms a raw transcript into readable text by applying punctuation, paragraph/list structure, filler cleanup, and obvious spoken self-correction handling.
-- [ ] **TEXT-02**: The user can choose a language or language set and a writing style for at least Personal, Work, Email, and Other contexts.
-- [ ] **TEXT-03**: The user can add, edit, remove, and test dictionary words and whole-word correction rules with deterministic precedence.
-- [ ] **TEXT-04**: The user can define spoken snippets that expand to saved text without modifying the immutable raw transcript.
-- [ ] **TEXT-05**: The user can choose deterministic cleanup or an explicitly configured local/LAN/cloud cleanup provider, with the selected policy stored per job.
-- [ ] **TEXT-06**: If a cleanup provider fails, times out, or returns empty output, the raw transcript is inserted instead and the fallback is recorded (Handy #2268).
+- [x] **TEXT-01**: The application transforms a raw transcript into readable text by applying punctuation, paragraph/list structure, filler cleanup, and obvious spoken self-correction handling. (Phase 3 offline verification)
+- [x] **TEXT-02**: The user can choose a language or language set and a writing style for at least Personal, Work, Email, and Other contexts. (Phase 3 persisted settings)
+- [x] **TEXT-03**: The user can add, edit, remove, and test dictionary words and whole-word correction rules with deterministic precedence. (Phase 3 persisted settings)
+- [x] **TEXT-04**: The user can define spoken snippets that expand to saved text without modifying the immutable raw transcript. (Phase 3 persisted settings)
+- [x] **TEXT-05**: The user can choose deterministic cleanup or an explicitly configured local/LAN/cloud cleanup provider, with the selected policy stored per job. (Phase 3 offline provider contract)
+- [x] **TEXT-06**: If a cleanup provider fails, times out, or returns empty output, the raw transcript is inserted instead and the fallback is recorded (Handy #2268). (Phase 3 offline provider/fallback tests)
 
 ### Insertion and Recovery
 
@@ -98,31 +98,31 @@ Deferred until the v1 dictation loop is reliable.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PLAT-01 | Phase 1 | Complete |
-| PLAT-02 | Phase 1 | Code complete; host validation in Phase 02.1 |
+| PLAT-02 | Phase 1 | Code complete; host validation pending in Phase 02.1 |
 | PLAT-03 | Phase 1 | Complete |
-| AUDIO-01 | Phase 1 | Code complete; host validation in Phase 02.1 |
-| SKEL-01 | Phase 02.1 | Pending |
-| SKEL-02 | Phase 02.1 | Pending |
-| SKEL-03 | Phase 02.1 | Pending |
-| AUDIO-02 | Phase 2 | Pending |
-| AUDIO-03 | Phase 2 | Pending |
-| AUDIO-04 | Phase 2 | Pending |
-| TEXT-01 | Phase 3 | Pending |
-| TEXT-02 | Phase 3 | Pending |
-| TEXT-03 | Phase 3 | Pending |
-| TEXT-04 | Phase 3 | Pending |
-| TEXT-05 | Phase 3 | Pending |
-| TEXT-06 | Phase 3 | Pending |
-| INSERT-01 | Phase 4 | Pending |
-| INSERT-02 | Phase 4 | Pending |
-| INSERT-03 | Phase 4 | Pending |
-| REC-01 | Phase 4 | Pending |
-| REC-02 | Phase 4 | Pending |
-| REC-03 | Phase 4 | Pending |
-| PRIV-01 | Phase 5 | Pending |
-| PRIV-02 | Phase 5 | Pending |
-| CONFIG-01 | Phase 5 | Pending |
-| BUILD-01 | Phase 5 | Pending |
+| AUDIO-01 | Phase 1 | Code complete; host validation pending in Phase 02.1 |
+| SKEL-01 | Phase 02.1 | Implementation complete; host acceptance pending |
+| SKEL-02 | Phase 02.1 | Implementation complete; on-host benchmark/latency pending |
+| SKEL-03 | Phase 02.1 | Implementation complete; host consent/reuse acceptance pending |
+| AUDIO-02 | Phase 2 | Offline contracts complete; installed-model/live-host validation pending |
+| AUDIO-03 | Phase 2 | Offline contracts complete; configured-provider host validation pending |
+| AUDIO-04 | Phase 2 | Offline timing surfaces complete; real benchmark pending |
+| TEXT-01 | Phase 3 | Offline verified; host insertion remains upstream-pending |
+| TEXT-02 | Phase 3 | Offline verified; host settings acceptance pending |
+| TEXT-03 | Phase 3 | Offline verified; host settings acceptance pending |
+| TEXT-04 | Phase 3 | Offline verified; host settings acceptance pending |
+| TEXT-05 | Phase 3 | Offline verified; host settings acceptance pending |
+| TEXT-06 | Phase 3 | Offline verified; host insertion remains upstream-pending |
+| INSERT-01 | Phase 4 | Automatic implementation complete; GNOME host acceptance pending |
+| INSERT-02 | Phase 4 | Automatic implementation complete; GNOME host acceptance pending |
+| INSERT-03 | Phase 4 | Automatic implementation complete; GNOME host acceptance pending |
+| REC-01 | Phase 4 | Automatic implementation complete; GNOME host acceptance pending |
+| REC-02 | Phase 4 | Automatic implementation complete; GNOME host acceptance pending |
+| REC-03 | Phase 4 | Automatic implementation complete; GNOME host acceptance pending |
+| PRIV-01 | Phase 5 | Automated policy implementation complete; settings/host acceptance pending |
+| PRIV-02 | Phase 5 | Automated redaction implementation complete; host acceptance pending |
+| CONFIG-01 | Phase 5 | Headless implementation complete; GTK/host acceptance pending |
+| BUILD-01 | Phase 5 | Local offline build evidence complete; Docker daemon/clean-checkout acceptance pending |
 
 **Coverage:**
 - v1 requirements: 26 total

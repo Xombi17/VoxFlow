@@ -32,6 +32,7 @@ class NetworkPolicy(StrEnum):
 
 
 _ENVIRONMENT_VARIABLE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+_SAFE_PROVIDER_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 
@@ -142,6 +143,45 @@ class RemoteProviderConfig(BaseModel):
             network_disclosure=self.network_disclosure,
             credential_env_var=self.credential_env_var,
         )
+
+
+class CleanupProviderConfig(BaseModel):
+    """User-supplied remote cleanup settings without a credential value."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    provider_id: StrictStr = Field(default="remote-cleanup", min_length=1)
+    endpoint: StrictStr = Field(min_length=1)
+    transport_timeout_seconds: float = Field(default=30.0, gt=0, le=300, strict=False)
+    network_disclosure: StrictBool = True
+    credential_env_var: StrictStr | None = None
+
+    _endpoint_validator = field_validator("endpoint")(_validate_endpoint)
+    _credential_validator = field_validator("credential_env_var")(_validate_environment_variable)
+
+    @field_validator("provider_id")
+    @classmethod
+    def validate_identity(cls, value: str) -> str:
+        if not _SAFE_PROVIDER_IDENTIFIER.fullmatch(value):
+            raise ValueError("provider_id must be a safe identifier")
+        return value
+
+    @property
+    def endpoint_classification(self) -> str:
+        """Return a safe coarse endpoint class without exposing host/path data."""
+
+        return classify_endpoint(self.endpoint)
+
+    def to_safe_dict(self) -> dict[str, object]:
+        """Return diagnostics with no endpoint, credential, or machine data."""
+
+        return {
+            "provider_kind": "cleanup",
+            "provider_id": self.provider_id,
+            "endpoint_classification": self.endpoint_classification,
+            "transport_timeout_seconds": self.transport_timeout_seconds,
+            "network_disclosure": self.network_disclosure,
+        }
 
 
 class ProviderSelectionSnapshot(BaseModel):

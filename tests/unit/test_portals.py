@@ -5,6 +5,7 @@ import pytest
 from voxflow.core.capabilities import CapabilityStatus
 from voxflow.platform.portals import (
     GLOBAL_SHORTCUTS_INTERFACE,
+    DbusNextPortalConnection,
     GlobalShortcutsPortal,
     APP_ID,
     DesktopEntryError,
@@ -94,8 +95,24 @@ def test_portal_probe_reports_version_and_hold_signals() -> None:
     assert result.capabilities[1].status is CapabilityStatus.NEEDS_USER_ACTION
 
 
-@pytest.mark.parametrize("version", [None, 1])
-def test_portal_probe_requires_global_shortcuts_version_two(version) -> None:
+def test_portal_probe_accepts_version_one_for_binding() -> None:
+    connection = FakePortalConnection(
+        PortalInterfaceDescription(
+            version=1,
+            methods=frozenset({"CreateSession", "BindShortcuts"}),
+            signals=frozenset({"Activated", "Deactivated"}),
+        )
+    )
+
+    result = asyncio.run(GlobalShortcutsPortal(connection).probe())
+
+    assert result.version == 1
+    assert result.capability.status is CapabilityStatus.AVAILABLE
+    assert result.failure is None
+
+
+@pytest.mark.parametrize("version", [None, 0])
+def test_portal_probe_rejects_missing_or_older_global_shortcuts_version(version) -> None:
     connection = FakePortalConnection(
         PortalInterfaceDescription(
             version=version,
@@ -110,7 +127,7 @@ def test_portal_probe_requires_global_shortcuts_version_two(version) -> None:
     assert result.capability.status is CapabilityStatus.UNSUPPORTED
     assert result.failure is not None
     assert result.failure.code is PortalErrorCode.UNSUPPORTED_VERSION
-    assert "version 2" in result.failure.reason
+    assert "version 1" in result.failure.reason
 
 
 def test_missing_portal_service_is_typed_and_actionable() -> None:
@@ -220,6 +237,91 @@ def test_portal_request_tokens_are_unique_and_not_fixed() -> None:
     assert len(tokens) == 3
     assert all(token.startswith("voxflow_") for token in tokens)
     assert "voxflow_session" not in tokens
+
+
+def test_dbus_bind_shortcuts_uses_list_structs() -> None:
+    connection = DbusNextPortalConnection()
+
+    prepared = connection._prepare_arguments(
+        "BindShortcuts",
+        (
+            "/org/freedesktop/portal/session/1",
+            (("dictation", {"description": "Hold to dictate"}),),
+            "",
+            {"handle_token": "voxflow_bind_test"},
+        ),
+    )
+
+    assert isinstance(prepared[1], list)
+    assert isinstance(prepared[1][0], list)
+    assert prepared[1][0][0] == "dictation"
+
+
+def test_dbus_global_shortcuts_use_signal_safe_request_transport() -> None:
+    class RequestProbe(DbusNextPortalConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = []
+
+        async def call_request(self, interface, method, signature, *arguments, token):
+            self.calls.append((interface, method, signature, arguments, token))
+            return {}
+
+    connection = RequestProbe()
+
+    async def scenario() -> None:
+        await connection.call(
+            "CreateSession",
+            {
+                "handle_token": "voxflow_create_test",
+                "session_handle_token": "voxflow_session_test",
+            },
+        )
+        await connection.call(
+            "BindShortcuts",
+            "/org/freedesktop/portal/session/1",
+            (("dictation", {"description": "Hold to dictate"}),),
+            "",
+            {"handle_token": "voxflow_bind_test"},
+        )
+
+    asyncio.run(scenario())
+
+    assert connection.calls[0][1:3] == ("CreateSession", "a{sv}")
+    assert connection.calls[0][-1] == "voxflow_create_test"
+    assert connection.calls[1][1:3] == ("BindShortcuts", "oa(sa{sv})sa{sv}")
+    assert connection.calls[1][-1] == "voxflow_bind_test"
+
+
+def test_dbus_shortcut_signal_adapter_matches_signal_arity() -> None:
+    class SignalInterface:
+        def __init__(self) -> None:
+            self.activated = None
+            self.removed = None
+
+        def on_activated(self, callback) -> None:
+            self.activated = callback
+
+        def off_activated(self, callback) -> None:
+            self.removed = callback
+
+    interface = SignalInterface()
+    connection = DbusNextPortalConnection()
+    connection._portal_interface = interface
+    received = []
+
+    async def scenario() -> None:
+        unsubscribe = await connection.subscribe(
+            "Activated", lambda *arguments: received.append(arguments)
+        )
+        assert interface.activated is not None
+        interface.activated("/session", "dictation", 42, {})
+        unsubscribe()
+
+    asyncio.run(scenario())
+
+    assert received == [("/session", "dictation", 42, {})]
+    assert interface.removed is interface.activated
 
 
 def test_portal_close_uses_injected_session_and_transport_boundaries() -> None:

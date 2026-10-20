@@ -12,9 +12,15 @@ from typing import Sequence
 
 from . import APP_NAME, __version__
 from .core.capabilities import CapabilityRecord
+from .core.diagnostics import build_diagnostics
 from .core.state import SessionStateMachine
 from .platform.audio import probe_audio
-from .platform.portals import GlobalShortcutsPortal, PortalProbeResult
+from .platform.portals import (
+    GlobalShortcutsPortal,
+    PortalClientError,
+    PortalProbeResult,
+    RemoteDesktopPortal,
+)
 from .platform.session import SessionInfo, detect_session
 
 
@@ -22,14 +28,25 @@ def diagnostic(
     capabilities: Iterable[CapabilityRecord] = (),
     session: SessionStateMachine | None = None,
     platform: dict[str, object] | None = None,
+    db_path: str | None = None,
 ) -> dict[str, object]:
     """Return the core diagnostic without touching desktop resources."""
 
     current_session = session or SessionStateMachine()
+    capability_values = tuple(capabilities)
+    if db_path is not None:
+        payload = build_diagnostics(
+            db_path=db_path,
+            capabilities=capability_values,
+            state=current_session,
+        )
+        if platform is not None:
+            payload["platform"] = platform
+        return payload
     payload: dict[str, object] = {
         "app": APP_NAME,
         "version": __version__,
-        "capabilities": [capability.to_dict() for capability in capabilities],
+        "capabilities": [capability.to_dict() for capability in capability_values],
         "state": current_session.to_dict(),
     }
     if platform is not None:
@@ -40,12 +57,13 @@ def diagnostic(
 def platform_diagnostic(
     session_info: SessionInfo | None = None,
     portal_result: PortalProbeResult | None = None,
+    insertion: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build a live platform diagnostic from injectable probe results."""
 
     current_session = session_info or detect_session()
     current_portal = portal_result or asyncio.run(GlobalShortcutsPortal().probe())
-    return {
+    payload: dict[str, object] = {
         "session": current_session.to_dict(),
         "session_capability": current_session.capability.to_dict(),
         "portal": current_portal.to_dict(),
@@ -54,6 +72,35 @@ def platform_diagnostic(
             current_portal,
         ),
     }
+    if insertion is not None:
+        payload["insertion"] = insertion
+    return payload
+
+
+async def _probe_insertion_capability() -> dict[str, object]:
+    """Probe the injectable insertion boundary without exposing token content."""
+
+    portal = RemoteDesktopPortal()
+    try:
+        await portal.open_session()
+    except PortalClientError:
+        pass
+    finally:
+        try:
+            await portal.close()
+        except Exception:
+            pass
+    return {
+        "capability": portal.capability.to_dict(),
+        "consent_required": portal.consent_required,
+        "restore_token_reused": portal.restore_token_reused,
+    }
+
+
+def insertion_platform_diagnostic() -> dict[str, object]:
+    """Run the opt-in RemoteDesktop/Clipboard insertion capability probe."""
+
+    return asyncio.run(_probe_insertion_capability())
 
 
 def audio_platform_diagnostic() -> dict[str, object]:
@@ -86,6 +133,8 @@ SUBCOMMANDS = {
     "insert-test": ("voxflow.platform.insert_cli", "main"),
     "models": ("voxflow.providers.catalog_cli", "main"),
     "install-identity": ("voxflow.platform.portals", "install_identity_main"),
+    "recovery": ("voxflow.recovery", "main"),
+    "settings": ("voxflow.ui.settings", "main"),
 }
 
 
@@ -124,11 +173,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="include live microphone discovery and open/close findings",
     )
+    parser.add_argument("--db", "--db-path", dest="db_path", default=None)
     arguments = parser.parse_args(argv)
     if arguments.probe_portals or arguments.probe_audio:
         platform: dict[str, object] = {}
         if arguments.probe_portals:
-            platform.update(platform_diagnostic())
+            platform.update(
+                platform_diagnostic(insertion=insertion_platform_diagnostic())
+            )
         if arguments.probe_audio:
             platform["audio"] = audio_platform_diagnostic()
 
@@ -154,6 +206,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 for capability in portal["capabilities"]
             )
+        if "insertion" in platform:
+            insertion = platform["insertion"]
+            assert isinstance(insertion, dict)
+            capability = insertion["capability"]
+            assert isinstance(capability, dict)
+            capabilities.append(
+                CapabilityRecord(
+                    id=capability["id"],
+                    status=capability["status"],
+                    reason=capability["reason"],
+                )
+            )
         if "audio" in platform:
             audio = platform["audio"]
             assert isinstance(audio, dict)
@@ -164,9 +228,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     reason=audio["capability"]["reason"],
                 )
             )
-        print(json.dumps(diagnostic(capabilities, platform=platform), sort_keys=True))
+        print(
+            json.dumps(
+                diagnostic(capabilities, platform=platform, db_path=arguments.db_path),
+                sort_keys=True,
+            )
+        )
     else:
-        print(json.dumps(diagnostic(), sort_keys=True))
+        print(json.dumps(diagnostic(db_path=arguments.db_path), sort_keys=True))
     return 0
 
 

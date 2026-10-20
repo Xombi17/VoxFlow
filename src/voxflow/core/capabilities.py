@@ -13,12 +13,14 @@ class CapabilityStatus(StrEnum):
 
     AVAILABLE = "available"
     NEEDS_USER_ACTION = "needs_user_action"
+    UNAVAILABLE = "unavailable"
     UNSUPPORTED = "unsupported"
 
 
 CAPABILITY_STATUS_ORDER: Final[tuple[CapabilityStatus, ...]] = (
     CapabilityStatus.AVAILABLE,
     CapabilityStatus.NEEDS_USER_ACTION,
+    CapabilityStatus.UNAVAILABLE,
     CapabilityStatus.UNSUPPORTED,
 )
 

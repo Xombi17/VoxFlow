@@ -29,7 +29,10 @@ PORTAL_OBJECT_PATH = "/org/freedesktop/portal/desktop"
 GLOBAL_SHORTCUTS_INTERFACE = "org.freedesktop.portal.GlobalShortcuts"
 REQUEST_INTERFACE = "org.freedesktop.portal.Request"
 SESSION_INTERFACE = "org.freedesktop.portal.Session"
-MIN_GLOBAL_SHORTCUTS_VERSION = 2
+# Version 1 already provides the APIs VoxFlow uses for the daemon:
+# CreateSession, BindShortcuts, Activated, and Deactivated. Version 2 adds
+# ConfigureShortcuts, which is optional for the current flow.
+MIN_GLOBAL_SHORTCUTS_VERSION = 1
 APP_ID = "dev.voxflow.VoxFlow"
 REGISTRY_INTERFACE = "org.freedesktop.host.portal.Registry"
 DESKTOP_ENTRY_NAME = f"{APP_ID}.desktop"
@@ -48,6 +51,7 @@ class PortalErrorCode(StrEnum):
     MALFORMED_RESPONSE = "malformed_response"
     REQUEST_FAILED = "request_failed"
     UNSUPPORTED_VERSION = "unsupported_version"
+    UNSUPPORTED_METHOD = "unsupported_method"
 
 
 class PortalClientError(RuntimeError):
@@ -198,12 +202,20 @@ def map_portal_error(error: BaseException, *, interface: str = GLOBAL_SHORTCUTS_
         elif any(
             marker in text
             for marker in (
+                "unknownmethod",
+                "unknown method",
+                "unsupported",
+                "not supported",
+            )
+        ):
+            code = PortalErrorCode.UNSUPPORTED_METHOD
+        elif any(
+            marker in text
+            for marker in (
                 "serviceunknown",
                 "name has no owner",
                 "not found",
                 "unavailable",
-                "unknownmethod",
-                "unknowninterface",
                 "unknownobject",
                 "dbus-next is not installed",
             )
@@ -229,15 +241,21 @@ def map_portal_error(error: BaseException, *, interface: str = GLOBAL_SHORTCUTS_
     elif code is PortalErrorCode.SERVICE_UNAVAILABLE:
         status = CapabilityStatus.UNSUPPORTED
         reason = (
-            f"{interface} is unavailable. Use a desktop portal backend "
-            "that implements GlobalShortcuts version 2."
+            f"{interface} is unavailable. Check that the desktop portal "
+            "service is running and implements GlobalShortcuts."
         )
     elif code is PortalErrorCode.UNSUPPORTED_VERSION:
         status = CapabilityStatus.UNSUPPORTED
         reason = (
             f"{interface} does not provide the required version "
             f"{MIN_GLOBAL_SHORTCUTS_VERSION}. Upgrade or select a desktop portal "
-            "backend that implements GlobalShortcuts version 2."
+            f"backend that implements GlobalShortcuts version {MIN_GLOBAL_SHORTCUTS_VERSION}."
+        )
+    elif code is PortalErrorCode.UNSUPPORTED_METHOD:
+        status = CapabilityStatus.UNSUPPORTED
+        reason = (
+            f"{interface} does not provide the requested portal method. "
+            "Use a desktop portal backend with the required interface."
         )
     elif code is PortalErrorCode.MALFORMED_RESPONSE:
         status = CapabilityStatus.UNSUPPORTED
@@ -264,6 +282,48 @@ def capability_for_failure(
         status=failure.status,
         reason=failure.reason,
     )
+
+
+def insertion_capability_for_failure(
+    failure: PortalFailure,
+    *,
+    capability_id: str = "insertion.portal",
+) -> CapabilityRecord:
+    """Map RemoteDesktop/Clipboard failures without changing shortcut mappings."""
+
+    if failure.code in (PortalErrorCode.PERMISSION_DENIED, PortalErrorCode.CANCELLED):
+        status = CapabilityStatus.NEEDS_USER_ACTION
+        reason = (
+            "RemoteDesktop and Clipboard consent is required. Approve the desktop "
+            "portal request, then retry insertion."
+        )
+    elif failure.code in (
+        PortalErrorCode.SERVICE_UNAVAILABLE,
+        PortalErrorCode.REQUEST_FAILED,
+    ):
+        status = CapabilityStatus.UNAVAILABLE
+        reason = (
+            "RemoteDesktop or Clipboard is unavailable. Check the desktop portal "
+            "service and retry insertion."
+        )
+    else:
+        status = CapabilityStatus.UNSUPPORTED
+        reason = (
+            "The desktop portal does not support the RemoteDesktop Clipboard "
+            "insertion path required by VoxFlow."
+        )
+    return CapabilityRecord(id=capability_id, status=status, reason=reason)
+
+
+def insertion_capability_for_error(
+    error: BaseException,
+    *,
+    capability_id: str = "insertion.portal",
+) -> CapabilityRecord:
+    """Return a redacted insertion capability for an arbitrary transport error."""
+
+    failure = map_portal_error(error, interface=REMOTE_DESKTOP_INTERFACE)
+    return insertion_capability_for_failure(failure, capability_id=capability_id)
 
 
 def _description_from_mapping(
@@ -359,6 +419,23 @@ def _request_token(kind: str) -> str:
     return f"voxflow_{kind}_{secrets.token_hex(16)}"
 
 
+def _request_handle_token(options: object) -> str:
+    """Extract the token used to predict a portal Request object path."""
+
+    if not isinstance(options, Mapping):
+        raise PortalClientError(
+            PortalErrorCode.MALFORMED_RESPONSE,
+            "portal request options must be a mapping",
+        )
+    token = _unwrap_dbus_value(options.get("handle_token"))
+    if not isinstance(token, str) or not token.strip():
+        raise PortalClientError(
+            PortalErrorCode.MALFORMED_RESPONSE,
+            "portal request options must include a handle_token",
+        )
+    return token
+
+
 class GlobalShortcutsPortal:
     """Portal client for probing and using one GlobalShortcuts session."""
 
@@ -435,7 +512,7 @@ class GlobalShortcutsPortal:
                 failure = map_portal_error(
                     PortalClientError(
                         PortalErrorCode.UNSUPPORTED_VERSION,
-                        "GlobalShortcuts version is missing or older than version 2",
+                        "GlobalShortcuts version is missing or older than version 1",
                     )
                 )
                 return PortalProbeResult(
@@ -628,6 +705,8 @@ class GlobalShortcutsPortal:
 def _error_code(dbus_name: str | None) -> PortalErrorCode:
     name = (dbus_name or "").lower()
     if "unknown" in name or "serviceunknown" in name:
+        if "unknownmethod" in name or "unknowninterface" in name:
+            return PortalErrorCode.UNSUPPORTED_METHOD
         return PortalErrorCode.SERVICE_UNAVAILABLE
     if "notallowed" in name or "accessdenied" in name:
         return PortalErrorCode.PERMISSION_DENIED
@@ -669,78 +748,147 @@ class RemoteDesktopPortal:
         self._save = token_saver or restore_token.store
         self.session_handle: str | None = None
         self._unsubscribes: list[Unsubscribe] = []
+        self.consent_required = False
+        self.restore_token_reused = False
+        self._capability = CapabilityRecord(
+            id="insertion.portal",
+            status=CapabilityStatus.UNAVAILABLE,
+            reason="RemoteDesktop and Clipboard insertion has not been initialized.",
+        )
+
+    @property
+    def capability(self) -> CapabilityRecord:
+        """The latest redacted RemoteDesktop/Clipboard insertion capability."""
+
+        return self._capability
+
+    def _record_failure(self, error: BaseException) -> None:
+        self._capability = insertion_capability_for_error(error)
+
+    def mark_eis_ready(self) -> None:
+        """Record readiness only after EIS and keymap resolution succeed."""
+
+        self._capability = CapabilityRecord(
+            id="insertion.portal",
+            status=CapabilityStatus.AVAILABLE,
+            reason="RemoteDesktop, Clipboard, EIS, and the compositor keymap are ready.",
+        )
+
+    def mark_eis_unavailable(self) -> None:
+        """Record that the portal session cannot currently provide EIS input."""
+
+        self._capability = CapabilityRecord(
+            id="insertion.portal",
+            status=CapabilityStatus.UNAVAILABLE,
+            reason="EIS keyboard or compositor keymap readiness failed; retry insertion.",
+        )
 
     async def _guard(self, interface: str, awaitable: Awaitable[Any]) -> Any:
         try:
             return await awaitable
-        except (asyncio.CancelledError, PortalClientError):
+        except asyncio.CancelledError:
+            raise
+        except PortalClientError as exc:
+            self._record_failure(exc)
             raise
         except Exception as exc:
             failure = map_portal_error(exc, interface=interface)
-            raise PortalClientError(failure.code, failure.reason) from exc
+            typed = PortalClientError(failure.code, failure.reason)
+            self._record_failure(typed)
+            raise typed from exc
 
     async def open_session(self) -> str:
         """CreateSession, SelectDevices, RequestClipboard, Start; persist token."""
 
         conn = self.connection
-        results = await self._guard(
-            REMOTE_DESKTOP_INTERFACE,
-            conn.call_request(
+        session: str | None = None
+        stored: str | None = None
+        try:
+            stored = self._load()
+            self.consent_required = not bool(stored)
+            self.restore_token_reused = bool(stored)
+            results = await self._guard(
                 REMOTE_DESKTOP_INTERFACE,
-                "CreateSession",
-                "a{sv}",
-                {
-                    "handle_token": (t := _request_token("request")),
-                    "session_handle_token": _request_token("session"),
-                },
-                token=t,
-            ),
-        )
-        session = _extract_string(results, field="session_handle")
-        self.session_handle = session
-        options: dict[str, object] = {
-            "types": DEVICE_KEYBOARD,
-            "persist_mode": PERSIST_UNTIL_REVOKED,
-        }
-        stored = self._load()
-        if stored:
-            options["restore_token"] = stored
-        await self._guard(
-            REMOTE_DESKTOP_INTERFACE,
-            conn.call_request(
-                REMOTE_DESKTOP_INTERFACE,
-                "SelectDevices",
-                "oa{sv}",
-                session,
-                {**options, "handle_token": (t := _request_token("select"))},
-                token=t,
-            ),
-        )
-        await self._guard(
-            CLIPBOARD_INTERFACE,
-            conn.call_interface(CLIPBOARD_INTERFACE, "RequestClipboard", "oa{sv}", session, {}),
-        )
-        started = await self._guard(
-            REMOTE_DESKTOP_INTERFACE,
-            conn.call_request(
-                REMOTE_DESKTOP_INTERFACE,
-                "Start",
-                "osa{sv}",
-                session,
-                "",
-                {"handle_token": (t := _request_token("start"))},
-                token=t,
-            ),
-        )
-        new_token = started.get("restore_token") if isinstance(started, Mapping) else None
-        if new_token and new_token != stored:
-            self._save(str(new_token))
-        if not (isinstance(started, Mapping) and started.get("clipboard_enabled")):
-            raise PortalClientError(
-                PortalErrorCode.SERVICE_UNAVAILABLE,
-                "RemoteDesktop session started without clipboard access",
+                conn.call_request(
+                    REMOTE_DESKTOP_INTERFACE,
+                    "CreateSession",
+                    "a{sv}",
+                    {
+                        "handle_token": (t := _request_token("request")),
+                        "session_handle_token": _request_token("session"),
+                    },
+                    token=t,
+                ),
             )
-        return session
+            session = _extract_string(results, field="session_handle")
+            self.session_handle = session
+            options: dict[str, object] = {
+                "types": DEVICE_KEYBOARD,
+                "persist_mode": PERSIST_UNTIL_REVOKED,
+            }
+            if stored:
+                options["restore_token"] = stored
+            await self._guard(
+                REMOTE_DESKTOP_INTERFACE,
+                conn.call_request(
+                    REMOTE_DESKTOP_INTERFACE,
+                    "SelectDevices",
+                    "oa{sv}",
+                    session,
+                    {**options, "handle_token": (t := _request_token("select"))},
+                    token=t,
+                ),
+            )
+            await self._guard(
+                CLIPBOARD_INTERFACE,
+                conn.call_interface(
+                    CLIPBOARD_INTERFACE, "RequestClipboard", "oa{sv}", session, {}
+                ),
+            )
+            started = await self._guard(
+                REMOTE_DESKTOP_INTERFACE,
+                conn.call_request(
+                    REMOTE_DESKTOP_INTERFACE,
+                    "Start",
+                    "osa{sv}",
+                    session,
+                    "",
+                    {"handle_token": (t := _request_token("start"))},
+                    token=t,
+                ),
+            )
+            if not (isinstance(started, Mapping) and started.get("clipboard_enabled")):
+                raise PortalClientError(
+                    PortalErrorCode.SERVICE_UNAVAILABLE,
+                    "RemoteDesktop session started without clipboard access",
+                )
+            new_token = started.get("restore_token") if isinstance(started, Mapping) else None
+            if new_token and new_token != stored:
+                self._save(str(new_token))
+            self._capability = CapabilityRecord(
+                id="insertion.portal",
+                status=CapabilityStatus.UNAVAILABLE,
+                reason=(
+                    "RemoteDesktop and Clipboard consent succeeded; EIS keyboard "
+                    "and compositor keymap readiness is pending. "
+                    + (
+                        "the stored restore token was reused."
+                        if self.restore_token_reused
+                        else "user consent may be requested once."
+                    )
+                ),
+            )
+            return session
+        except BaseException as exc:
+            if session is not None:
+                self.session_handle = None
+                try:
+                    await conn.close_session(session)
+                except BaseException:
+                    pass
+            if not isinstance(exc, asyncio.CancelledError):
+                self._record_failure(exc)
+            raise
 
     def _session(self) -> str:
         if self.session_handle is None:
@@ -790,7 +938,7 @@ class RemoteDesktopPortal:
             ),
         )
 
-    async def subscribe(self, signal: str, callback: Callable[..., object]) -> None:
+    async def subscribe(self, signal: str, callback: Callable[..., object]) -> Unsubscribe:
         """SelectionTransfer -> callback(mime, serial); SelectionOwnerChanged -> callback(is_owner)."""
 
         if signal not in {"SelectionTransfer", "SelectionOwnerChanged"}:
@@ -808,23 +956,46 @@ class RemoteDesktopPortal:
                 owner = _unwrap_dbus_value(options.get("session_is_owner", False))  # type: ignore[attr-defined]
                 callback(bool(owner))
 
-        self._unsubscribes.append(
-            await self._guard(
-                CLIPBOARD_INTERFACE,
-                self.connection.subscribe_signal(CLIPBOARD_INTERFACE, signal, on_signal),
-            )
+        unsubscribe = await self._guard(
+            CLIPBOARD_INTERFACE,
+            self.connection.subscribe_signal(CLIPBOARD_INTERFACE, signal, on_signal),
         )
+        self._unsubscribes.append(unsubscribe)
+
+        def remove_subscription() -> None:
+            if unsubscribe in self._unsubscribes:
+                self._unsubscribes.remove(unsubscribe)
+                unsubscribe()
+
+        return remove_subscription
 
     async def close(self) -> None:
-        for off in self._unsubscribes:
-            off()
+        for off in reversed(self._unsubscribes):
+            try:
+                off()
+            except BaseException:
+                pass
         self._unsubscribes.clear()
         handle, self.session_handle = self.session_handle, None
+        cleanup_error: BaseException | None = None
         try:
             if handle:
                 await self.connection.close_session(handle)
+        except BaseException as exc:
+            cleanup_error = exc
         finally:
-            await self.connection.close()
+            try:
+                await self.connection.close()
+            except BaseException as exc:
+                if cleanup_error is None:
+                    cleanup_error = exc
+        self._capability = CapabilityRecord(
+            id="insertion.portal",
+            status=CapabilityStatus.UNAVAILABLE,
+            reason="RemoteDesktop and Clipboard insertion session is closed.",
+        )
+        if cleanup_error is not None:
+            raise cleanup_error
 
 
 class DbusNextPortalConnection:
@@ -978,7 +1149,12 @@ class DbusNextPortalConnection:
         await self._add_match(REQUEST_INTERFACE, path)
         bus.add_message_handler(handler)
         try:
-            await self._send(interface, method, signature, arguments)
+            await self._send(
+                interface,
+                method,
+                signature,
+                self._prepare_arguments(method, arguments),
+            )
             return await future
         finally:
             bus.remove_message_handler(handler)
@@ -1104,12 +1280,40 @@ class DbusNextPortalConnection:
     async def call(self, method: str, *arguments: object) -> object:
         """Call a portal method and await its standard Request::Response."""
 
+        # GlobalShortcuts returns a Request object immediately.  Its response
+        # signal must be subscribed before sending the method call; introspecting
+        # the returned path afterwards races the portal's short-lived request
+        # object and can report a missing Request interface.
+        if method == "CreateSession":
+            options = arguments[0]
+            token = _request_handle_token(options)
+            return await self.call_request(
+                GLOBAL_SHORTCUTS_INTERFACE,
+                method,
+                "a{sv}",
+                options,
+                token=token,
+            )
+        if method == "BindShortcuts":
+            session_handle, shortcuts, parent_window, options = arguments
+            token = _request_handle_token(options)
+            return await self.call_request(
+                GLOBAL_SHORTCUTS_INTERFACE,
+                method,
+                "oa(sa{sv})sa{sv}",
+                session_handle,
+                shortcuts,
+                parent_window,
+                options,
+                token=token,
+            )
+
         iface = await self._load_portal_interface()
         method_name = re.sub(r"(?<!^)(?=[A-Z])", "_", method).lower()
         caller = getattr(iface, f"call_{method_name}", None)
         if caller is None:
             raise PortalClientError(
-                PortalErrorCode.MALFORMED_RESPONSE,
+                PortalErrorCode.UNSUPPORTED_METHOD,
                 f"portal method {method} is not available",
             )
         prepared = self._prepare_arguments(method, arguments)
@@ -1143,7 +1347,8 @@ class DbusNextPortalConnection:
             session_handle, shortcuts, parent, options = arguments
             converted_shortcuts = []
             for shortcut_id, properties in shortcuts:  # type: ignore[misc]
-                converted_shortcuts.append((shortcut_id, variants(properties)))
+                # dbus-next encodes STRUCT values from lists, not Python tuples.
+                converted_shortcuts.append([shortcut_id, variants(properties)])
             return (
                 session_handle,
                 converted_shortcuts,
@@ -1205,14 +1410,29 @@ class DbusNextPortalConnection:
         off_signal = getattr(iface, f"off_{normalized}", None)
         if on_signal is None:
             raise PortalClientError(
-                PortalErrorCode.MALFORMED_RESPONSE,
+                PortalErrorCode.UNSUPPORTED_METHOD,
                 f"portal signal {signal} is not available",
             )
-        on_signal(callback)
+        if signal in {"Activated", "Deactivated"}:
+
+            def handler(
+                session_handle: object,
+                shortcut_id: object,
+                timestamp: object,
+                options: object,
+            ) -> None:
+                callback(session_handle, shortcut_id, timestamp, options)
+
+        else:
+
+            def handler(session_handle: object, shortcuts: object) -> None:
+                callback(session_handle, shortcuts)
+
+        on_signal(handler)
 
         def unsubscribe() -> None:
             if off_signal is not None:
-                off_signal(callback)
+                off_signal(handler)
 
         return unsubscribe
 

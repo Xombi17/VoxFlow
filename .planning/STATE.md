@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 02.1 context gathered
-last_updated: "2026-10-17T07:42:05.365Z"
-last_activity: 2026-10-17
+stopped_at: Phase 05 plan 03 host-acceptance checkpoint
+last_updated: "2026-10-19T04:30:00Z"
+last_activity: 2026-10-19 -- Phase 5 automatic implementation and offline evidence completed; host acceptance pending
 progress:
   total_phases: 6
-  completed_phases: 2
-  total_plans: 10
-  completed_plans: 8
-  percent: 33
+  completed_phases: 4
+  total_plans: 16
+  completed_plans: 16
+  percent: 100
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-10-16)
 
 **Core value:** The user's spoken thought should become useful text in the focused app with as little manual cleanup as possible, without requiring a subscription or a hosted account.
-**Current focus:** Phase 2.1 — walking-skeleton-on-gnome-50
+**Current focus:** Phase 05 — Private, Reproducible Desktop App
 
 ## Current Position
 
-Phase: 2.1 (walking-skeleton-on-gnome-50) — EXECUTING
-Plan: 3 of 4
-Status: Ready to execute
-Last activity: 2026-10-17
+Phase: 05 (Private, Reproducible Desktop App) — HOST ACCEPTANCE PENDING
+Plan: 3 of 3
+Status: Automatic tasks complete; blocking GNOME/Docker evidence checkpoints remain
+Last activity: 2026-10-19 -- Phase 5 plan 03 automatic evidence completed offline
 
-Progress: [████████░░] 80%
+Progress: [████████████████████] 100% implementation plans
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6
+- Total plans completed: 16
 - Average duration: not measured for this execution
 - Total execution time: not measured for this execution
 
@@ -46,13 +46,13 @@ Progress: [████████░░] 80%
 |-------|-------|-------|----------|
 | 1. Wayland Foundation | 3 | 3 | — |
 | 2. Local Dictation Engine | 3 | 3 | — |
-| 3. Writing Pipeline | 0 | 3 | — |
-| 4. Insert and Recover | 0 | 3 | — |
-| 5. Private, Reproducible Desktop App | 0 | 3 | — |
+| 3. Writing Pipeline | 3 | 3 | — |
+| 4. Insert and Recover | 3 | 3 | — |
+| 5. Private, Reproducible Desktop App | 3 | 3 | — |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-02, 01-03, 02-01, 02-02, 02-03
+- Last 5 plans: 02.1-03, 02.1-04, 03-01, 03-02, 03-03
 - Trend: steady
 
 | Phase 01 P01 | 12 min | 3 tasks | 10 files |
@@ -89,6 +89,10 @@ None yet.
 - Phase 1 must validate microphone permission, mute, disconnect, recovery, and negotiated format on Ubuntu GNOME. Plan 01-03 provides the adapter/checklist and records this host's missing `sounddevice` limitation.
 - Phase 1 must validate a safe, usable Wayland insertion path for the user's target applications.
 - Target hardware details are still needed before choosing a default local ASR model size.
+- Phase 02.1 implementation plans are complete, but the required GNOME 50 host acceptance remains unrecorded.
+- Phase 03 is offline code complete; host acceptance is not required for its text contracts, but full user-flow validation still depends on closing Phase 02.1 host acceptance.
+- Phase 04 automatic implementation is offline-tested; GNOME host acceptance for insertion, recovery, consent persistence, and retention remains blocking.
+- Phase 05 automatic implementation and offline evidence are complete. Live GTK/GNOME acceptance remains pending, and Docker verification is blocked by permission to the local Docker daemon socket.
 
 ### Quick Tasks Completed
 
@@ -108,6 +112,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-17T07:42:05.352Z
-Stopped at: Phase 02.1 context gathered
+Last session: 2026-10-19T04:30:00Z
+Stopped at: Phase 05 plan 03 host-acceptance checkpoint
 Resume file: None

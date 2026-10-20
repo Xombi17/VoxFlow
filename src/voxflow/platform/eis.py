@@ -11,8 +11,9 @@ from __future__ import annotations
 import ctypes
 import os
 import select
+import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 MAX_KEYMAP_BYTES = 1 << 20  # T-02.1-08: hard cap on the keymap read
@@ -158,15 +159,27 @@ class LibXkbcommon:
             lib.xkb_context_unref(ctx)
 
 
-def resolve_keycodes(keymap_text: str, xkb: Any | None = None) -> tuple[int, int]:
-    """Return evdev (ctrl, v) keycodes from the compositor keymap."""
+def resolve_keycodes(
+    keymap_text: str,
+    xkb: Any | None = None,
+    names: Sequence[str] = ("Control_L", "v"),
+) -> tuple[int, ...]:
+    """Return evdev keycodes for a compositor-keymap-derived key sequence.
+
+    The default remains the two-key Ctrl+V paste chord.  ``names`` is a
+    sequence of keysyms, so configured chords such as Ctrl+Shift+V use the
+    same compositor keymap and transport without ever typing characters.
+    """
 
     xkb = xkb or LibXkbcommon()
-    found = xkb.find_keycodes(keymap_text, ("Control_L", "v"))
-    try:
-        return found["Control_L"], found["v"]
-    except KeyError as exc:
-        raise EisError(f"keymap has no key for {exc}") from exc
+    requested = tuple(names)
+    if not requested:
+        raise EisError("configured chord must contain at least one key")
+    found = xkb.find_keycodes(keymap_text, requested)
+    missing = next((name for name in requested if name not in found), None)
+    if missing is not None:
+        raise EisError(f"keymap has no key for {missing}")
+    return tuple(found[name] for name in requested)
 
 
 def _poll(fd: int, timeout_s: float) -> None:
@@ -251,21 +264,55 @@ class EisKeyboard:
             raise EisError("not connected")
         return self._keymap
 
-    def send_paste_chord(self, keycodes: tuple[int, int]) -> None:
+    def send_chord(self, keycodes: Sequence[int]) -> None:
+        """Emit one keymap-derived chord, with no per-character typing."""
+
         if self._device is None or not self._ready:
             raise EisError("keyboard device is not ready")
         lib, dev = self._lib, self._device
-        ctrl, v = keycodes
+        sequence = tuple(int(keycode) for keycode in keycodes)
+        if not sequence:
+            raise EisError("configured chord must contain at least one key")
         self._sequence += 1
         lib.ei_device_start_emulating(dev, self._sequence)
-        lib.ei_device_keyboard_key(dev, ctrl, True)
-        lib.ei_device_keyboard_key(dev, v, True)
-        lib.ei_device_frame(dev, lib.ei_now(self._ei))
-        lib.ei_device_keyboard_key(dev, v, False)
-        lib.ei_device_keyboard_key(dev, ctrl, False)
-        lib.ei_device_frame(dev, lib.ei_now(self._ei))
-        lib.ei_device_stop_emulating(dev)
+        pressed: list[int] = []
+        try:
+            for keycode in sequence:
+                lib.ei_device_keyboard_key(dev, keycode, True)
+                pressed.append(keycode)
+            lib.ei_device_frame(dev, lib.ei_now(self._ei))
+            for keycode in reversed(sequence):
+                lib.ei_device_keyboard_key(dev, keycode, False)
+                pressed.pop()
+            lib.ei_device_frame(dev, lib.ei_now(self._ei))
+        finally:
+            original_error = sys.exc_info()[1]
+            cleanup_error: BaseException | None = None
+            for keycode in reversed(pressed):
+                try:
+                    lib.ei_device_keyboard_key(dev, keycode, False)
+                except BaseException as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
+            if pressed:
+                try:
+                    lib.ei_device_frame(dev, lib.ei_now(self._ei))
+                except BaseException as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
+            try:
+                lib.ei_device_stop_emulating(dev)
+            except BaseException as exc:
+                if cleanup_error is None:
+                    cleanup_error = exc
+            if cleanup_error is not None and original_error is None:
+                raise cleanup_error
         lib.ei_dispatch(self._ei)  # flush
+
+    def send_paste_chord(self, keycodes: Sequence[int]) -> None:
+        """Backward-compatible name for the configurable chord sender."""
+
+        self.send_chord(keycodes)
 
     def close(self) -> None:
         if self._ei is not None and self._lib is not None:

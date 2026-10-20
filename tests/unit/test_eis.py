@@ -29,6 +29,16 @@ def test_keycodes_follow_keymap_not_constants() -> None:
         resolve_keycodes("Control_L=37", FakeXkb())
 
 
+def test_configured_ctrl_shift_v_uses_lowercase_character_keysym() -> None:
+    names = ("Control_L", "Shift_L", "v")
+
+    assert resolve_keycodes(
+        "Control_L=37 Shift_L=50 v=55",
+        FakeXkb(),
+        names=names,
+    ) == (29, 42, 47)
+
+
 @pytest.mark.skipif(not ctypes.util.find_library("xkbcommon"), reason="no libxkbcommon")
 def test_real_xkbcommon_resolves_from_generated_keymap() -> None:
     import ctypes
@@ -46,6 +56,7 @@ def test_real_xkbcommon_resolves_from_generated_keymap() -> None:
     text = ctypes.string_at(lib.xkb_keymap_get_as_string(km, 1)).decode()
     ctrl, v = resolve_keycodes(text)
     assert (ctrl, v) == (29, 47)  # default us layout
+    assert resolve_keycodes(text, names=("Control_L", "Shift_L", "v")) == (29, 42, 47)
 
 
 def test_keymap_read_is_bounded(tmp_path) -> None:
@@ -130,6 +141,56 @@ def test_chord_event_order(keymap) -> None:
     ]
     kb.close()
     assert lib.log[-1] == "unref"
+
+
+def test_configured_ctrl_shift_v_releases_in_reverse_order(keymap) -> None:
+    lib = FakeLib(keymap)
+    kb = EisKeyboard(lib, poll=lambda fd, t: None)
+    kb.connect(3)
+    kb.send_chord((29, 42, 47))
+
+    chord = [event for event in lib.log if event != "dispatch"]
+    assert chord == [
+        "bind",
+        "start",
+        ("key", 29, True),
+        ("key", 42, True),
+        ("key", 47, True),
+        "frame",
+        ("key", 47, False),
+        ("key", 42, False),
+        ("key", 29, False),
+        "frame",
+        "stop",
+    ]
+
+
+def test_chord_emission_failure_releases_pressed_keys_and_stops(keymap) -> None:
+    class FailingLib(FakeLib):
+        def ei_device_keyboard_key(self, dev, code, press):
+            super().ei_device_keyboard_key(dev, code, press)
+            if press and code == 47:
+                raise RuntimeError("emission failed")
+
+    lib = FailingLib(keymap)
+    kb = EisKeyboard(lib, poll=lambda fd, t: None)
+    kb.connect(3)
+
+    with pytest.raises(RuntimeError, match="emission failed"):
+        kb.send_chord((29, 42, 47))
+
+    chord = [event for event in lib.log if event != "dispatch"]
+    assert chord == [
+        "bind",
+        "start",
+        ("key", 29, True),
+        ("key", 42, True),
+        ("key", 47, True),
+        ("key", 42, False),
+        ("key", 29, False),
+        "frame",
+        "stop",
+    ]
 
 
 def test_no_keyboard_times_out_and_disconnect_errors(keymap) -> None:

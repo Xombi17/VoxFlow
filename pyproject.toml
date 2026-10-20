@@ -6,9 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "voxflow"
 version = "0.1.0"
 description = "Local-first voice writing assistant for Ubuntu GNOME Wayland"
-requires-python = ">=3.12,<3.13"
+requires-python = "==3.12.14"
 dependencies = [
     "faster-whisper==1.2.1",
+    "av==18.1.0",
     "pydantic==2.12.4",
     "dbus-next==0.2.3",
     "sounddevice==0.5.6",

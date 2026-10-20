@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import queue
 import threading
 from collections.abc import Awaitable, Callable
@@ -103,6 +104,12 @@ class AudioSessionConfig:
     def retain_audio(self) -> bool:
         return self.retain_artifact
 
+    @property
+    def retention_policy(self) -> str:
+        """Stable policy name used by durable job history."""
+
+        return "retain" if self.retain_artifact else "discard_after_terminal"
+
 
 @dataclass(frozen=True, slots=True)
 class AudioSessionFailure:
@@ -133,6 +140,7 @@ class AudioSessionOutcome:
     retryable: bool = False
     retry_code: str | None = None
     diagnostics: dict[str, object] | None = None
+    retention_policy: str = "retain"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "kind", AudioSessionOutcomeType(self.kind))
@@ -163,6 +171,7 @@ class AudioSessionOutcome:
             "outcome": self.kind.value,
             "captured_frames": self.captured_frames,
             "artifact": self.artifact.to_dict() if self.artifact else None,
+            "retention_policy": self.retention_policy,
             "failure": self.failure.to_dict() if self.failure else None,
             "retryable": self.retryable,
             "retry_code": self.retry_code,
@@ -254,6 +263,7 @@ class AudioSession:
                     ),
                 )
             elif self._terminal_kind is None:
+                self._register_failure_callback(opened)
                 await self.capture.start()
         except asyncio.CancelledError:
             self._request_terminal(AudioSessionOutcomeType.CANCELLED)
@@ -313,6 +323,32 @@ class AudioSession:
             return False
         self._registered = True
         return True
+
+    def _register_failure_callback(self, opened: OpenedAudioStream) -> None:
+        """Attach an optional backend failure seam without changing stream callers.
+
+        Older capture streams only deliver PCM frames.  Newer backends, such as
+        the sounddevice adapter, can report a watchdog or transport failure from
+        their own worker.  Keeping this hook optional preserves the existing
+        ``AudioStream`` protocol and lets the session own the terminal outcome
+        and cleanup ordering.
+        """
+
+        register = getattr(opened.stream, "register_failure_callback", None)
+        if not callable(register):
+            register = getattr(self.capture, "register_failure_callback", None)
+        if callable(register):
+            register(self._on_capture_failure)
+
+    def _on_capture_failure(self, failure: AudioSessionFailure | object) -> None:
+        if isinstance(failure, AudioSessionFailure):
+            normalized = failure
+        else:
+            normalized = AudioSessionFailure(
+                code=AudioSessionErrorCode.CAPTURE_FAILED.value,
+                reason="Audio capture failed before a terminal artifact was written.",
+            )
+        self._request_terminal(AudioSessionOutcomeType.FAILED, normalized)
 
     def _on_frame(self, data: bytes, frame_count: int) -> None:
         """Copy and enqueue only; no disk, model, or event work runs here."""
@@ -475,9 +511,30 @@ class AudioSession:
             retryable=retryable,
             retry_code=retry_code,
             diagnostics=safe_diagnostics,
+            retention_policy=self.config.retention_policy,
         )
         self._finished = True
         return self._outcome
+
+    def discard_artifact(self, artifact: AudioArtifact | None = None) -> bool:
+        """Delete a materialized artifact after its terminal job action.
+
+        Capture still materializes a completed artifact when retention is off so
+        the current ASR provider can read it.  The daemon calls this method once
+        processing reaches a terminal state; it is idempotent and never exposes
+        the local path through diagnostics.
+        """
+
+        target = artifact or (self._outcome.artifact if self._outcome else None)
+        if target is None:
+            return False
+        try:
+            os.unlink(target.path)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+        return True
 
     async def _cleanup_capture(self) -> Any:
         stop_failure: AudioSessionFailure | None = None

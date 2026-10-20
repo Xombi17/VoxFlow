@@ -1,0 +1,57 @@
+[
+  {
+    "name": "punctuation_and_filler",
+    "raw": "um hello comma world",
+    "final": "Hello, world."
+  },
+  {
+    "name": "spoken_paragraph",
+    "raw": "hello new paragraph this is the second thought",
+    "final": "Hello\n\nThis is the second thought."
+  },
+  {
+    "name": "spoken_list",
+    "raw": "first buy milk, second call Sam",
+    "final": "- Buy milk\n- Call Sam."
+  },
+  {
+    "name": "self_correction",
+    "raw": "I want to meet Monday, no, Tuesday",
+    "final": "I want to meet Tuesday."
+  },
+  {
+    "name": "protected_spans",
+    "raw": "email Alice@example.com and visit https://example.com/path?q=1",
+    "final": "Email Alice@example.com and visit https://example.com/path?q=1."
+  },
+  {
+    "name": "quoted_literal",
+    "raw": "run `git status` period",
+    "final": "Run `git status`."
+  },
+  {
+    "name": "unchanged_meaning",
+    "raw": "The report is ready.",
+    "final": "The report is ready."
+  },
+  {
+    "name": "snippet_fixture",
+    "raw": "please use my address",
+    "settings": {
+      "snippets": [
+        {"rule_id": 40, "trigger": "my address", "replacement": "123 Main St"}
+      ]
+    },
+    "final": "Please use 123 Main St."
+  },
+  {
+    "name": "correction_fixture",
+    "raw": "send it to alcie",
+    "settings": {
+      "corrections": [
+        {"rule_id": 41, "trigger": "alcie", "replacement": "Alice"}
+      ]
+    },
+    "final": "Send it to Alice."
+  }
+]

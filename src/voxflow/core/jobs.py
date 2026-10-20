@@ -127,6 +127,18 @@ class DictationJobRunner:
     def cancellation(self) -> CancellationToken:
         return self._token
 
+    def request_cancel(self) -> None:
+        """Request cancellation without waiting on the owning processing task.
+
+        The daemon owns the task that awaits ``run``.  A shutdown path must
+        cancel that outer task directly rather than calling ``cancel`` and
+        making it wait on itself.
+        """
+
+        self._token.cancel()
+        if self._run_task is None or self._run_task is asyncio.current_task():
+            self._finish_cancelled()
+
     async def run(self) -> DictationJobSnapshot:
         """Dispatch, validate, and finish one job exactly once."""
 
@@ -192,7 +204,7 @@ class DictationJobRunner:
     async def cancel(self) -> DictationJobSnapshot:
         """Request cooperative cancellation and await the provider boundary."""
 
-        self._token.cancel()
+        self.request_cancel()
         if self._run_task is None:
             self._finish_cancelled()
             return self._snapshot

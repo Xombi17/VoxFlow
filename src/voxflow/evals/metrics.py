@@ -11,8 +11,9 @@ import asyncio
 import math
 import resource
 import time
+import unicodedata
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from ..audio.artifacts import AudioArtifact
 from ..core.jobs import DictationJobRunner
@@ -232,3 +233,147 @@ def _peak_resource_mb() -> float | None:
         return None
     # Linux reports KiB; keep the field portable and explicitly approximate.
     return round(float(usage.ru_maxrss) / 1024, 3)
+
+
+def word_error_rate(reference: str, hypothesis: str) -> float:
+    """Return word-level Levenshtein error as a percentage.
+
+    Punctuation is treated as a separator and comparison is case-insensitive.
+    The reference is the denominator by definition; an empty reference is not
+    a meaningful accuracy measurement.
+    """
+
+    reference_words = _normalized_words(reference)
+    hypothesis_words = _normalized_words(hypothesis)
+    if not reference_words:
+        raise ValueError("reference text must contain at least one word")
+    previous = list(range(len(hypothesis_words) + 1))
+    for reference_word in reference_words:
+        current = [previous[0] + 1]
+        for index, hypothesis_word in enumerate(hypothesis_words, start=1):
+            substitution = previous[index - 1] + (reference_word != hypothesis_word)
+            insertion = current[index - 1] + 1
+            deletion = previous[index] + 1
+            current.append(min(substitution, insertion, deletion))
+        previous = current
+    return (previous[-1] / len(reference_words)) * 100.0
+
+
+def select_default(
+    results: Mapping[str, Mapping[str, object]],
+    *,
+    target_ms: float = 700,
+    reference_model_id: str = "medium.en",
+) -> dict[str, object]:
+    """Choose the fastest accurate non-reference candidate from result rows."""
+
+    if target_ms <= 0:
+        raise ValueError("target_ms must be positive")
+
+    def number(row: Mapping[str, object], key: str) -> float | None:
+        value = row.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value) if math.isfinite(float(value)) else None
+
+    candidates = {
+        model_id: row
+        for model_id, row in results.items()
+        if isinstance(model_id, str) and isinstance(row, Mapping)
+    }
+    non_reference = {
+        model_id: row for model_id, row in candidates.items() if model_id != reference_model_id
+    }
+    non_reference_with_wer = {
+        model_id: row
+        for model_id, row in non_reference.items()
+        if number(row, "wer") is not None
+    }
+    fastest_non_reference = min(
+        (
+            (number(row, "p50_ms"), model_id)
+            for model_id, row in non_reference.items()
+            if number(row, "p50_ms") is not None
+        ),
+        default=(None, None),
+    )[1]
+    measured_wers = [
+        number(row, "wer")
+        for row in candidates.values()
+        if number(row, "wer") is not None
+    ]
+    best_wer = min(measured_wers) if measured_wers else None
+
+    if not non_reference_with_wer:
+        return {
+            "status": "unvalidated_accuracy",
+            "default": None,
+            "fastest": fastest_non_reference,
+            "best_wer": best_wer,
+            "message": (
+                "Accuracy is unvalidated; confirm the flagged fastest model with "
+                "`voxflow models use <id>` or rerun with a reference sentence."
+            ),
+        }
+
+    assert best_wer is not None
+    eligible = {
+        model_id: row
+        for model_id, row in non_reference_with_wer.items()
+        if number(row, "wer") is not None
+        and number(row, "wer") <= best_wer + 2.0
+        and number(row, "p50_ms") is not None
+    }
+    fastest_eligible = min(
+        (
+            (number(row, "p50_ms"), model_id)
+            for model_id, row in eligible.items()
+        ),
+        default=(None, None),
+    )[1]
+    if fastest_eligible is None:
+        return {
+            "status": "no_default_under_target",
+            "default": None,
+            "fastest": None,
+            "best_wer": best_wer,
+            "message": "No candidate passed the measured accuracy rule.",
+        }
+
+    under_target = {
+        model_id: row
+        for model_id, row in eligible.items()
+        if number(row, "p50_ms") is not None and number(row, "p50_ms") < target_ms
+    }
+    selected = min(
+        (
+            (number(row, "p50_ms"), model_id)
+            for model_id, row in under_target.items()
+        ),
+        default=(None, None),
+    )[1]
+    if selected is not None:
+        return {
+            "status": "ok",
+            "default": selected,
+            "fastest": None,
+            "best_wer": best_wer,
+            "message": "Selected the fastest non-reference candidate within the WER threshold.",
+        }
+    return {
+        "status": "no_default_under_target",
+        "default": fastest_eligible,
+        "fastest": None,
+        "best_wer": best_wer,
+        "message": (
+            f"The fastest accurate candidate misses the {target_ms:g} ms target; "
+            "the target is flagged for the user."
+        ),
+    }
+
+
+def _normalized_words(value: str) -> list[str]:
+    if not isinstance(value, str):
+        raise TypeError("transcript values must be strings")
+    chars = [" " if unicodedata.category(char).startswith("P") else char.lower() for char in value]
+    return "".join(chars).split()

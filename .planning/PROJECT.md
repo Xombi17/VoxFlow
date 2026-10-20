@@ -18,9 +18,9 @@ The user's spoken thought should become useful text in the focused app with as l
 
 - [ ] User can start and stop push-to-talk dictation with a configurable global shortcut on Ubuntu GNOME Wayland.
 - [ ] User receives accurate transcription from a local model, with an optional user-configured cloud provider.
-- [ ] User receives polished text that removes filler, handles obvious self-corrections, adds punctuation, and preserves intended paragraphs and lists.
+- [x] User receives polished text that removes filler, handles obvious self-corrections, adds punctuation, and preserves intended paragraphs and lists. (Phase 3 offline code complete)
 - [ ] User can insert the result into the focused application via the XDG Clipboard + RemoteDesktop/EIS portals (one-time consent).
-- [ ] User can configure language selection, app-aware writing styles, microphone, shortcut behavior, and local/cloud provider preference.
+- [ ] User can configure language selection, app-aware writing styles, microphone, shortcut behavior, and local/cloud provider preference. (Writing settings API complete; GTK settings surface remains Phase 5)
 - [ ] User can manage dictionary words, corrections, snippets, recent transcripts, retryable failures, and privacy controls.
 - [ ] User can run the core dictation flow without an account, paid plan, or vendor-specific licensing service.
 - [ ] User can inspect failures and recover a transcript without losing captured audio when recovery is technically possible.

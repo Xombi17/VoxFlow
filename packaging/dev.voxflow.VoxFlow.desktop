@@ -1,8 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=VoxFlow
-Comment=Local-first voice writing assistant
-Exec=voxflow daemon
+Version=1.0
+Name=VoxFlow Settings
+Comment=Configure the local-first voice writing assistant
+Exec=voxflow settings
 Icon=audio-input-microphone
-NoDisplay=true
+Terminal=false
+StartupNotify=true
 Categories=Utility;
+Keywords=voice;dictation;settings;

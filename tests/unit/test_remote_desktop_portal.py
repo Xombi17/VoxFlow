@@ -9,6 +9,7 @@ from voxflow.platform.portals import (
     PortalErrorCode,
     RemoteDesktopPortal,
 )
+from voxflow.core.capabilities import CapabilityStatus
 
 S = "/org/freedesktop/portal/desktop/session/x/s1"
 
@@ -83,6 +84,17 @@ def test_call_order_options_and_token_persisted() -> None:
     assert saved == ["tok2"]
 
 
+def test_success_reports_pending_eis_readiness_and_consent_state() -> None:
+    p, _ = make(FakeConn())
+
+    run(p.open_session())
+
+    assert p.capability.status is CapabilityStatus.UNAVAILABLE
+    assert "EIS" in p.capability.reason
+    assert p.consent_required is True
+    assert p.restore_token_reused is False
+
+
 def test_no_stored_token_omits_restore_token_and_same_token_not_rewritten() -> None:
     conn = FakeConn()
     p, saved = make(conn)
@@ -94,7 +106,7 @@ def test_no_stored_token_omits_restore_token_and_same_token_not_rewritten() -> N
     assert saved2 == []
 
 
-def test_cancel_is_denied_and_missing_interface_unavailable() -> None:
+def test_cancel_is_denied_and_missing_method_is_unsupported() -> None:
     p, _ = make(FakeConn(fail_on={"Start": PortalClientError(PortalErrorCode.CANCELLED, "x")}))
     with pytest.raises(PortalClientError) as e:
         run(p.open_session())
@@ -102,7 +114,20 @@ def test_cancel_is_denied_and_missing_interface_unavailable() -> None:
     p, _ = make(FakeConn(fail_on={"RequestClipboard": RuntimeError("org.freedesktop.DBus.Error.UnknownMethod")}))
     with pytest.raises(PortalClientError) as e:
         run(p.open_session())
-    assert e.value.code is PortalErrorCode.SERVICE_UNAVAILABLE
+    assert e.value.code is PortalErrorCode.UNSUPPORTED_METHOD
+
+
+@pytest.mark.parametrize("method", ["SelectDevices", "RequestClipboard", "Start"])
+def test_setup_failure_rolls_back_created_session(method) -> None:
+    conn = FakeConn(fail_on={method: RuntimeError("private backend detail")})
+    p, _ = make(conn)
+
+    with pytest.raises(PortalClientError):
+        run(p.open_session())
+
+    assert p.session_handle is None
+    assert conn.closed == [S]
+    assert p.capability.status is CapabilityStatus.UNAVAILABLE
 
 
 def test_clipboard_not_enabled_is_unavailable() -> None:
@@ -110,6 +135,32 @@ def test_clipboard_not_enabled_is_unavailable() -> None:
     with pytest.raises(PortalClientError) as e:
         run(p.open_session())
     assert e.value.code is PortalErrorCode.SERVICE_UNAVAILABLE
+
+
+def test_rollback_cleanup_cancellation_does_not_replace_original_error() -> None:
+    class CleanupCancelled(FakeConn):
+        async def close_session(self, handle):
+            raise asyncio.CancelledError()
+
+    conn = CleanupCancelled(fail_on={"Start": RuntimeError("start failed")})
+    p, _ = make(conn)
+
+    with pytest.raises(PortalClientError) as error:
+        run(p.open_session())
+
+    assert error.value.code is PortalErrorCode.REQUEST_FAILED
+
+
+def test_rollback_preserves_original_cancellation() -> None:
+    class CleanupCancelled(FakeConn):
+        async def close_session(self, handle):
+            raise asyncio.CancelledError()
+
+    conn = CleanupCancelled(fail_on={"Start": asyncio.CancelledError()})
+    p, _ = make(conn)
+
+    with pytest.raises(asyncio.CancelledError):
+        run(p.open_session())
 
 
 def test_clipboard_methods_and_signals_filtered_by_session() -> None:
@@ -134,3 +185,4 @@ def test_clipboard_methods_and_signals_filtered_by_session() -> None:
     names = [m for m, _ in conn.log]
     assert names[-3:] == ["SetSelection", "SelectionWrite", "SelectionWriteDone"]
     assert conn.closed == [S, "conn"]
+    assert conn.signals == {}

@@ -1,4 +1,4 @@
-"""Provider contracts and explicitly selected ASR adapters."""
+"""Provider contracts and explicitly selected ASR and cleanup adapters."""
 
 from .asr import (
     ASRContractError,
@@ -12,6 +12,14 @@ from .asr import (
     Segment,
     TranscriptResult,
 )
+from .cleanup import (
+    CleanupCancellationError,
+    CleanupProvider,
+    CleanupProviderError,
+    CleanupRequest,
+    CleanupResponse,
+    RemoteCleanupProvider,
+)
 
 __all__ = [
     "ASRContractError",
@@ -24,4 +32,10 @@ __all__ = [
     "ProviderConfigSnapshot",
     "Segment",
     "TranscriptResult",
+    "CleanupCancellationError",
+    "CleanupProvider",
+    "CleanupProviderError",
+    "CleanupRequest",
+    "CleanupResponse",
+    "RemoteCleanupProvider",
 ]

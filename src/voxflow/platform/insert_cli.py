@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -44,7 +45,9 @@ def main(
             await sleep(args.delay_seconds)
             outcome = await inserter.insert(args.text)
         finally:
-            inserter.close()
+            result = inserter.close()
+            if inspect.isawaitable(result):
+                await result
             await close()
         return {"result": outcome.result.value, "fallback_hint": outcome.fallback_hint}
 

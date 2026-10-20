@@ -3,7 +3,7 @@ import socket
 
 import pytest
 
-from voxflow.providers import catalog
+from voxflow.providers import catalog, catalog_cli
 from voxflow.providers.catalog import CatalogError, FetchResponse, ModelEntry, ModelFile
 
 DATA = b"hello model bytes" * 100
@@ -120,3 +120,21 @@ def test_remove_symlink_refused(tmp_path):
     with pytest.raises(CatalogError):
         catalog.remove("m1", root, db_path=tmp_path / "d.db")
     assert outside.exists()
+
+
+def test_cli_download_accepts_multiple_model_ids(monkeypatch, tmp_path, capsys):
+    entries = {model_id: entry(mid=model_id) for model_id in ("m1", "m2")}
+    calls = []
+
+    monkeypatch.setattr(catalog_cli.catalog, "get_entry", entries.__getitem__)
+
+    def fake_download(model, root, *, confirm):
+        calls.append((model.id, root, confirm("network")))
+
+    monkeypatch.setattr(catalog_cli.catalog, "download_model", fake_download)
+
+    assert catalog_cli.main(["--root", str(tmp_path), "download", "m1", "m2", "--yes"]) == 0
+    assert [model_id for model_id, _root, confirmed in calls if confirmed] == ["m1", "m2"]
+    output = capsys.readouterr().out
+    assert "Installed m1" in output
+    assert "Installed m2" in output
